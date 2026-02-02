@@ -231,9 +231,9 @@ export function EquityUnlockForm({
           <p className="font-medium text-foreground mb-6">{email}</p>
           
           {/* Reveal Net Equity */}
-          <div className="p-4 rounded-xl bg-background/50 max-w-xs mx-auto">
-            <p className="text-xs text-muted-foreground mb-1">Your Estimated Net Equity</p>
-            <p className="text-2xl font-bold">
+          <div className="p-6 rounded-xl bg-background/50 max-w-sm mx-auto">
+            <p className="text-sm text-muted-foreground mb-2">Your Estimated Net Equity</p>
+            <p className="text-4xl sm:text-5xl md:text-6xl font-bold">
               <GradientText>{formatCurrency(netEquity)}</GradientText>
             </p>
             {hasRenovations && renovationAmount > 0 && (

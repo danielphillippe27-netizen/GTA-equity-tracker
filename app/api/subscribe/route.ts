@@ -80,17 +80,32 @@ export async function POST(request: NextRequest) {
     }
 
     // Send welcome email (don't block on failure)
+    console.log('[Subscribe] Attempting welcome email with data:', {
+      email: email.toLowerCase().trim(),
+      name: name || 'Homeowner',
+      hasPropertyData: !!propertyData,
+      estimatedValue: propertyData?.estimatedCurrentValue,
+      netEquity: propertyData?.netEquity,
+      region: propertyData?.region,
+      propertyType: propertyData?.propertyType,
+    });
+    
     if (propertyData) {
-      sendWelcomeEmail({
-        to: email.toLowerCase().trim(),
-        name: name || 'Homeowner',
-        estimatedValue: propertyData.estimatedCurrentValue || 0,
-        equityGained: propertyData.netEquity || 0,
-        region: propertyData.region || 'GTA',
-        propertyType: propertyData.propertyType || 'Property',
-      }).catch((err) => {
-        console.error('Welcome email failed (non-blocking):', err);
-      });
+      try {
+        const emailResult = await sendWelcomeEmail({
+          to: email.toLowerCase().trim(),
+          name: name || 'Homeowner',
+          estimatedValue: propertyData.estimatedCurrentValue || 0,
+          equityGained: propertyData.netEquity || 0,
+          region: propertyData.region || 'GTA',
+          propertyType: propertyData.propertyType || 'Property',
+        });
+        console.log('[Subscribe] Welcome email result:', emailResult);
+      } catch (err) {
+        console.error('[Subscribe] Welcome email failed:', err);
+      }
+    } else {
+      console.log('[Subscribe] No propertyData, skipping welcome email');
     }
 
     return NextResponse.json({
