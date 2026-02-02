@@ -2,7 +2,7 @@ import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'hello@phillippegroup.ca';
+const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'info@phillippegroup.ca';
 const FROM_NAME = 'Daniel Philippe | GTA Equity Tracker';
 
 interface SendWelcomeEmailParams {
@@ -54,7 +54,7 @@ export async function sendWelcomeEmail({
   try {
     const { data, error } = await resend.emails.send({
       from: `${FROM_NAME} <${FROM_EMAIL}>`,
-      replyTo: 'info@phillippegroup.ca',
+      replyTo: 'daniel.phillippe27@gmail.com',
       to: [to],
       subject: `Welcome to GTA Equity Tracker - Your ${region} ${propertyType} Report`,
       html: `
@@ -170,7 +170,7 @@ export async function sendMonthlyReport({
   try {
     const { data, error } = await resend.emails.send({
       from: `${FROM_NAME} <${FROM_EMAIL}>`,
-      replyTo: 'info@phillippegroup.ca',
+      replyTo: 'daniel.phillippe27@gmail.com',
       to: [to],
       subject: `Your ${region} Equity Update: ${isUp ? '📈' : '📉'} ${isUp ? '+' : ''}${valueChangePercent}% this month`,
       html: `
