@@ -54,6 +54,7 @@ export async function sendWelcomeEmail({
   try {
     const { data, error } = await resend.emails.send({
       from: `${FROM_NAME} <${FROM_EMAIL}>`,
+      replyTo: 'info@phillippegroup.ca',
       to: [to],
       subject: `Welcome to GTA Equity Tracker - Your ${region} ${propertyType} Report`,
       html: `
@@ -169,6 +170,7 @@ export async function sendMonthlyReport({
   try {
     const { data, error } = await resend.emails.send({
       from: `${FROM_NAME} <${FROM_EMAIL}>`,
+      replyTo: 'info@phillippegroup.ca',
       to: [to],
       subject: `Your ${region} Equity Update: ${isUp ? '📈' : '📉'} ${isUp ? '+' : ''}${valueChangePercent}% this month`,
       html: `

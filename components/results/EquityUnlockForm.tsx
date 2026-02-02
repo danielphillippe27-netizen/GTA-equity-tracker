@@ -278,7 +278,7 @@ export function EquityUnlockForm({
     >
       {/* Header */}
       <div className="p-6 sm:p-8 pb-4 sm:pb-6 text-center">
-        <h3 className="text-xl sm:text-2xl font-bold text-foreground mb-2">
+        <h3 className="text-3xl sm:text-4xl md:text-5xl font-bold text-foreground mb-3">
           Track Your <GradientText>Wealth Position</GradientText>
         </h3>
         <p className="text-sm text-muted-foreground">
