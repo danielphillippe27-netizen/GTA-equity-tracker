@@ -1,0 +1,102 @@
+{
+  "metadata": {
+    "source": "TRREB / Official Board Data",
+    "lastUpdated": "2024-12-01",
+    "currentMarketPhase": "balanced",
+    "description": "GTA average home prices by month from 1996 to present. Replace this sample data with actual market data."
+  },
+  "marketPhases": {
+    "hot": {
+      "volatilityBand": 0.04,
+      "description": "Strong seller's market with rapid price appreciation"
+    },
+    "balanced": {
+      "volatilityBand": 0.06,
+      "description": "Equilibrium between buyers and sellers"
+    },
+    "soft": {
+      "volatilityBand": 0.09,
+      "description": "Buyer's market with price uncertainty"
+    }
+  },
+  "historicalRates": {
+    "1996": 7.50,
+    "1997": 6.75,
+    "1998": 6.50,
+    "1999": 6.75,
+    "2000": 7.25,
+    "2001": 6.25,
+    "2002": 5.75,
+    "2003": 5.25,
+    "2004": 5.00,
+    "2005": 5.25,
+    "2006": 5.75,
+    "2007": 6.00,
+    "2008": 5.50,
+    "2009": 3.50,
+    "2010": 3.25,
+    "2011": 3.50,
+    "2012": 3.25,
+    "2013": 3.25,
+    "2014": 3.00,
+    "2015": 2.75,
+    "2016": 2.70,
+    "2017": 2.95,
+    "2018": 3.50,
+    "2019": 3.25,
+    "2020": 2.50,
+    "2021": 2.00,
+    "2022": 4.50,
+    "2023": 5.50,
+    "2024": 5.00,
+    "2025": 4.75
+  },
+  "monthly": [
+    { "year": 1996, "month": 1, "avgPrice": 198500, "salesVolume": 2450 },
+    { "year": 1996, "month": 6, "avgPrice": 203200, "salesVolume": 4200 },
+    { "year": 1996, "month": 12, "avgPrice": 201800, "salesVolume": 2100 },
+    
+    { "year": 2000, "month": 1, "avgPrice": 228500, "salesVolume": 2800 },
+    { "year": 2000, "month": 6, "avgPrice": 243000, "salesVolume": 5100 },
+    { "year": 2000, "month": 12, "avgPrice": 238400, "salesVolume": 2650 },
+    
+    { "year": 2005, "month": 1, "avgPrice": 325000, "salesVolume": 3200 },
+    { "year": 2005, "month": 6, "avgPrice": 348500, "salesVolume": 6500 },
+    { "year": 2005, "month": 12, "avgPrice": 342000, "salesVolume": 3100 },
+    
+    { "year": 2010, "month": 1, "avgPrice": 418500, "salesVolume": 4100 },
+    { "year": 2010, "month": 6, "avgPrice": 435200, "salesVolume": 8200 },
+    { "year": 2010, "month": 12, "avgPrice": 425800, "salesVolume": 3800 },
+    
+    { "year": 2015, "month": 1, "avgPrice": 552300, "salesVolume": 4800 },
+    { "year": 2015, "month": 6, "avgPrice": 587400, "salesVolume": 9500 },
+    { "year": 2015, "month": 12, "avgPrice": 578200, "salesVolume": 4200 },
+    
+    { "year": 2017, "month": 1, "avgPrice": 725100, "salesVolume": 5200 },
+    { "year": 2017, "month": 4, "avgPrice": 920800, "salesVolume": 11200 },
+    { "year": 2017, "month": 6, "avgPrice": 793500, "salesVolume": 7800 },
+    { "year": 2017, "month": 12, "avgPrice": 735200, "salesVolume": 4100 },
+    
+    { "year": 2020, "month": 1, "avgPrice": 840800, "salesVolume": 4500 },
+    { "year": 2020, "month": 6, "avgPrice": 930500, "salesVolume": 9200 },
+    { "year": 2020, "month": 12, "avgPrice": 929200, "salesVolume": 7100 },
+    
+    { "year": 2021, "month": 1, "avgPrice": 967885, "salesVolume": 6900 },
+    { "year": 2021, "month": 6, "avgPrice": 1089500, "salesVolume": 11100 },
+    { "year": 2021, "month": 12, "avgPrice": 1157800, "salesVolume": 6200 },
+    
+    { "year": 2022, "month": 1, "avgPrice": 1242800, "salesVolume": 5600 },
+    { "year": 2022, "month": 2, "avgPrice": 1334500, "salesVolume": 9100 },
+    { "year": 2022, "month": 6, "avgPrice": 1146200, "salesVolume": 6500 },
+    { "year": 2022, "month": 12, "avgPrice": 1051200, "salesVolume": 3400 },
+    
+    { "year": 2023, "month": 1, "avgPrice": 1038500, "salesVolume": 3100 },
+    { "year": 2023, "month": 6, "avgPrice": 1182400, "salesVolume": 7100 },
+    { "year": 2023, "month": 12, "avgPrice": 1084200, "salesVolume": 3800 },
+    
+    { "year": 2024, "month": 1, "avgPrice": 1026500, "salesVolume": 3200 },
+    { "year": 2024, "month": 6, "avgPrice": 1162300, "salesVolume": 6800 },
+    { "year": 2024, "month": 9, "avgPrice": 1107200, "salesVolume": 4500 },
+    { "year": 2024, "month": 12, "avgPrice": 1095800, "salesVolume": 3900 }
+  ]
+}
