@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { User, Session, AuthError } from '@supabase/supabase-js';
+import { User, Session, AuthError, Provider } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
 
 interface AuthContextType {
@@ -15,6 +15,10 @@ interface AuthContextType {
       propertyData?: Record<string, unknown>;
       redirectTo?: string;
     }
+  ) => Promise<{ error: AuthError | null }>;
+  signInWithOAuth: (
+    provider: 'google' | 'apple',
+    redirectTo?: string
   ) => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<void>;
 }
@@ -75,6 +79,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const signInWithOAuth = useCallback(
+    async (provider: 'google' | 'apple', redirectTo?: string) => {
+      const callbackUrl =
+        redirectTo || `${window.location.origin}/auth/callback?next=/dashboard`;
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: callbackUrl,
+          queryParams: provider === 'google' ? {
+            access_type: 'offline',
+            prompt: 'consent',
+          } : undefined,
+        },
+      });
+
+      return { error };
+    },
+    []
+  );
+
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
   }, []);
@@ -86,6 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         session,
         loading,
         signInWithMagicLink,
+        signInWithOAuth,
         signOut,
       }}
     >
