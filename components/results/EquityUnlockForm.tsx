@@ -96,10 +96,6 @@ export function EquityUnlockForm({
   const [downPaymentAmount, setDownPaymentAmount] = useState(purchasePrice * (defaultDownPaymentPercent / 100));
   const [downPaymentOverride, setDownPaymentOverride] = useState('');
 
-  // Renovation investment tracking
-  const [hasRenovations, setHasRenovations] = useState(false);
-  const [renovationAmount, setRenovationAmount] = useState(0);
-
   // Helpers for interest rate stepper
   const adjustRate = (delta: number) => {
     setInterestRate((prev) => Math.max(0.5, Math.min(12, Math.round((prev + delta) * 100) / 100)));
@@ -134,17 +130,6 @@ export function EquityUnlockForm({
     return calculateNetEquity(estimatedCurrentValue, mortgageSummary.remainingBalance);
   }, [estimatedCurrentValue, mortgageSummary.remainingBalance]);
 
-  // Calculate total invested (purchase + renovations)
-  const totalInvested = useMemo(() => {
-    return purchasePrice + (hasRenovations ? renovationAmount : 0);
-  }, [purchasePrice, hasRenovations, renovationAmount]);
-
-  // Calculate true ROI including renovations
-  const trueROI = useMemo(() => {
-    if (totalInvested <= 0) return 0;
-    return ((estimatedCurrentValue - totalInvested) / totalInvested) * 100;
-  }, [estimatedCurrentValue, totalInvested]);
-
   // Handle form submission - simple subscribe API
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -166,10 +151,6 @@ export function EquityUnlockForm({
           amortization: parseInt(amortization, 10),
           downPayment: effectiveDownPayment,
         },
-        renovations: hasRenovations ? {
-          totalInvestment: renovationAmount,
-        } : null,
-        totalInvested,
         netEquity,
       };
 
@@ -236,11 +217,6 @@ export function EquityUnlockForm({
             <p className="text-2xl font-bold">
               <GradientText>{formatCurrency(netEquity)}</GradientText>
             </p>
-            {hasRenovations && renovationAmount > 0 && (
-              <p className="text-xs text-muted-foreground mt-2">
-                Including {formatCurrency(renovationAmount)} in renovations
-              </p>
-            )}
           </div>
         </div>
 
@@ -441,50 +417,6 @@ export function EquityUnlockForm({
                   </p>
                 </div>
 
-                {/* Renovation Investment Toggle */}
-                <div className="pt-2 border-t border-border/50">
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={hasRenovations}
-                      onChange={(e) => setHasRenovations(e.target.checked)}
-                      className="w-4 h-4 rounded border-border bg-background/50 text-accent-cyan focus:ring-accent-cyan/50"
-                    />
-                    <span className="text-sm text-foreground">
-                      I&apos;ve invested in renovations
-                    </span>
-                  </label>
-                  
-                  <AnimatePresence>
-                    {hasRenovations && (
-                      <motion.div
-                        initial={{ height: 0, opacity: 0 }}
-                        animate={{ height: 'auto', opacity: 1 }}
-                        exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className="overflow-hidden"
-                      >
-                        <div className="mt-3 pl-7">
-                          <Label className="text-xs text-muted-foreground">
-                            Total Renovation Investment
-                          </Label>
-                          <Input
-                            type="number"
-                            min="0"
-                            value={renovationAmount || ''}
-                            onChange={(e) => setRenovationAmount(parseFloat(e.target.value) || 0)}
-                            className="mt-1.5 bg-background/50 border-border"
-                            placeholder="$50,000"
-                          />
-                          <p className="text-xs text-muted-foreground mt-1.5">
-                            Kitchen, bathroom, basement, etc.
-                          </p>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
                 <p className="text-xs text-muted-foreground flex items-start gap-1.5">
                   <Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
                   Defaults based on common mortgage terms at time of purchase.
@@ -497,7 +429,7 @@ export function EquityUnlockForm({
 
       {/* Values Display - Below Assumptions */}
       <div className="px-6 sm:px-8 pb-6">
-        <div className={`grid gap-4 text-center ${hasRenovations ? 'sm:grid-cols-4' : 'sm:grid-cols-3'}`}>
+        <div className="grid gap-4 text-center sm:grid-cols-3">
           {/* Estimated Value - Always visible */}
           <div className="p-4 rounded-xl bg-background/50">
             <p className="text-xs text-muted-foreground mb-1">Estimated Value</p>
@@ -505,19 +437,6 @@ export function EquityUnlockForm({
               {formatCurrency(estimatedCurrentValue)}
             </p>
           </div>
-          
-          {/* Total Invested - Only show if renovations */}
-          {hasRenovations && (
-            <div className="p-4 rounded-xl bg-background/50">
-              <p className="text-xs text-muted-foreground mb-1">Total Invested</p>
-              <p className="text-lg font-semibold text-foreground">
-                {formatCurrency(totalInvested)}
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Purchase + Renos
-              </p>
-            </div>
-          )}
           
           {/* Mortgage Balance - Always visible */}
           <div className="p-4 rounded-xl bg-background/50">
