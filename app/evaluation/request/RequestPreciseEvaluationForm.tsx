@@ -8,6 +8,7 @@ interface RequestPreciseEvaluationFormProps {
   subscriberId?: string | null;
   initialName?: string | null;
   initialEmail?: string | null;
+  initialAddress?: string | null;
   region?: string | null;
   propertyType?: string | null;
 }
@@ -17,12 +18,14 @@ export function RequestPreciseEvaluationForm({
   subscriberId,
   initialName,
   initialEmail,
+  initialAddress,
   region,
   propertyType,
 }: RequestPreciseEvaluationFormProps) {
   const [formData, setFormData] = useState({
     name: initialName || '',
     email: initialEmail || '',
+    address: initialAddress || '',
     phone: '',
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -38,6 +41,7 @@ export function RequestPreciseEvaluationForm({
       'Source: monthly home wealth email',
       subscriberId ? `Subscriber ID: ${subscriberId}` : null,
       estimateId ? `Estimate ID: ${estimateId}` : null,
+      formData.address ? `Address: ${formData.address}` : null,
       region ? `Region: ${region}` : null,
       propertyType ? `Property type: ${propertyType}` : null,
     ]
@@ -103,9 +107,8 @@ export function RequestPreciseEvaluationForm({
         Request a direct follow-up from The Phillippe Group
       </h2>
       <p className="mb-8 text-base leading-7 text-muted-foreground">
-        This route is designed for email recipients. We preloaded your details so
-        the button can create a real follow-up request instead of dropping you on
-        a generic page.
+        Submit the form below and we&apos;ll personally review your home and
+        follow up with a more precise valuation.
       </p>
 
       <form className="space-y-5" onSubmit={handleSubmit}>
@@ -126,6 +129,29 @@ export function RequestPreciseEvaluationForm({
             required
             className="w-full rounded-2xl border border-border bg-background px-4 py-3 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-accent-blue"
             placeholder="Your full name"
+          />
+        </div>
+
+        <div>
+          <label
+            className="mb-2 block text-sm font-medium text-foreground"
+            htmlFor="precise-eval-address"
+          >
+            Address
+          </label>
+          <input
+            id="precise-eval-address"
+            type="text"
+            value={formData.address}
+            onChange={(event) =>
+              setFormData((current) => ({
+                ...current,
+                address: event.target.value,
+              }))
+            }
+            required
+            className="w-full rounded-2xl border border-border bg-background px-4 py-3 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-accent-blue"
+            placeholder="123 Main St"
           />
         </div>
 
@@ -163,8 +189,9 @@ export function RequestPreciseEvaluationForm({
             onChange={(event) =>
               setFormData((current) => ({ ...current, phone: event.target.value }))
             }
+            required
             className="w-full rounded-2xl border border-border bg-background px-4 py-3 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-accent-blue"
-            placeholder="Optional, if you want a call back"
+            placeholder="(416) 123 1234"
           />
         </div>
 
@@ -178,14 +205,20 @@ export function RequestPreciseEvaluationForm({
           type="submit"
           className="w-full justify-center"
           size="lg"
-          disabled={isSubmitting || !formData.name || !formData.email}
+          disabled={
+            isSubmitting ||
+            !formData.name ||
+            !formData.email ||
+            !formData.address ||
+            !formData.phone
+          }
         >
-          {isSubmitting ? 'Submitting Request...' : 'Request Precise Home Evaluation'}
+          {isSubmitting ? 'Submitting Request...' : 'Get My Precise Evaluation'}
         </GlowButton>
 
         <p className="text-sm leading-6 text-muted-foreground">
-          Submission creates a tagged evaluation request in your CRM table and
-          sends an internal notification email so you can follow up directly.
+          We&apos;ll review your request and follow up directly. No generic
+          emails.
         </p>
       </form>
     </div>

@@ -41,6 +41,14 @@ export function EquitySnapshot({
           ? { label: 'Moderate leverage', className: 'border-amber-400/30 bg-amber-400/10 text-amber-300' }
           : { label: 'High leverage', className: 'border-red-400/30 bg-red-400/10 text-red-300' };
   const helocCapacity = hasCoreValues ? Math.max(0, estimatedValue * 0.8 - mortgageBalance) : null;
+  const leverageMessage =
+    ltv === null
+      ? null
+      : ltv < 65
+        ? 'You have a strong equity buffer, which usually gives you the most flexibility with lenders.'
+        : ltv <= 80
+          ? 'You still have workable equity, but borrowing flexibility is more limited than for low-leverage owners.'
+          : 'You are carrying very little equity right now, so refinancing or HELOC access will usually stay limited until the balance comes down or the property value improves.';
 
   return (
     <section className="rounded-[28px] border border-border bg-surface/85 p-6 sm:p-8">
@@ -63,7 +71,7 @@ export function EquitySnapshot({
           </div>
           {ltv !== null ? (
             <p className="mt-2 text-sm text-muted-foreground">
-              At this level, most lenders allow refinancing and HELOC access.
+              {leverageMessage}
             </p>
           ) : null}
 
@@ -104,9 +112,28 @@ export function EquitySnapshot({
         </div>
       )}
 
-      <div className="mt-8 rounded-2xl border border-border bg-background/20 p-5">
-        <h3 className="text-sm font-semibold text-foreground">Smart position insights</h3>
+      <details className="mt-8 rounded-2xl border border-border bg-background/20 p-5 group">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Financial details</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Expand to view payment, refinance, and borrowing context.
+            </p>
+          </div>
+          <span className="text-xs uppercase tracking-[0.18em] text-muted-foreground transition-transform group-open:rotate-180">
+            v
+          </span>
+        </summary>
+
         <div className="mt-4 space-y-4 text-sm text-muted-foreground">
+          <div className="flex flex-col gap-1 border-b border-border/70 pb-4 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-foreground">Estimated current payment</span>
+            <span>
+              {currentEstimatedPayment !== null
+                ? `${formatCurrency(currentEstimatedPayment)}/mo`
+                : 'Not available.'}
+            </span>
+          </div>
           <div className="flex flex-col gap-1 border-b border-border/70 pb-4 sm:flex-row sm:items-center sm:justify-between">
             <span className="text-foreground">Refinance snapshot</span>
             {refinancePayment !== null ? (
@@ -135,7 +162,7 @@ export function EquitySnapshot({
           </div>
           <p className="text-xs text-muted-foreground">(Subject to lender approval)</p>
         </div>
-      </div>
+      </details>
     </section>
   );
 }

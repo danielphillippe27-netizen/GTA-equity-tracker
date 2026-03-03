@@ -388,9 +388,9 @@ export default function ResultsPage() {
           <Link href="/" className="text-lg font-semibold text-foreground">
             GTA Equity Tracker
           </Link>
-          <Link href="/">
-            <GlowButton variant="ghost" size="sm">
-              New Estimate
+          <Link href={`/evaluation/request?estimateId=${estimateId}`}>
+            <GlowButton size="sm">
+              Request Free Home Evaluation
             </GlowButton>
           </Link>
         </div>
@@ -427,6 +427,15 @@ export default function ResultsPage() {
               isFallback={marketStats?.isFallback ?? false}
             />
           </div>
+        </motion.section>
+
+        <motion.section
+          className="mb-8"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.08 }}
+        >
+          <FreeEvalCTA estimateId={estimateId} />
         </motion.section>
 
         {result.hpiTrend && result.hpiTrend.length > 0 ? (
@@ -504,14 +513,6 @@ export default function ResultsPage() {
               }
             }}
           />
-        </motion.section>
-
-        <motion.section
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.25 }}
-        >
-          <FreeEvalCTA />
         </motion.section>
 
         <footer className="mt-6 flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-border/70 bg-surface/50 px-4 py-3 text-center text-xs text-muted-foreground">
