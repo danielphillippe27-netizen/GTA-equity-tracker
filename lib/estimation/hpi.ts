@@ -4,10 +4,36 @@
  */
 
 import { createServerClient } from '@/lib/supabase/server';
-import { getLookupKeys } from '@/lib/district-mapping';
+import {
+  getAreaIdForMarketData,
+  getAreaTaxonomy,
+  getAreaTaxonomyById,
+  getPropertyTypeIdForMarketData,
+} from '@/lib/trreb-taxonomy';
 
 // Types
 export interface HPIDataPoint {
+  reportMonth: string;
+  hpiIndex: number;
+  benchmarkPrice: number | null;
+}
+
+export interface CurrentMarketStats {
+  sales: number | null;
+  newListings: number | null;
+  activeListings: number | null;
+  averageSoldPrice: number | null;
+  medianPrice: number | null;
+  averageDaysOnMarket: number | null;
+  salesToNewListingsRatio: number | null;
+  monthsOfInventory: number | null;
+  reportMonth: string | null;
+  scopeAreaName: string | null;
+  scopeLevel: 'zone' | 'municipality' | 'neighborhood' | null;
+  isFallback: boolean;
+}
+
+export interface MarketSnapshot {
   reportMonth: string;
   hpiIndex: number;
   benchmarkPrice: number | null;
@@ -45,6 +71,7 @@ export interface HPIEstimateResult {
     balanced: MarketScenario;
     soft: MarketScenario;
   };
+  currentMarketStats?: CurrentMarketStats;
 }
 
 /**
@@ -52,6 +79,44 @@ export interface HPIEstimateResult {
  */
 function formatReportMonth(year: number, month: number): string {
   return `${year}-${month.toString().padStart(2, '0')}`;
+}
+
+function formatPeriod(year: number, month: number): string {
+  return `${formatReportMonth(year, month)}-01`;
+}
+
+function normalizeLookupInputs(areaName: string, propertyCategory: string) {
+  return {
+    areaId: getAreaIdForMarketData(areaName),
+    propertyTypeId: getPropertyTypeIdForMarketData(propertyCategory),
+  };
+}
+
+function getFallbackAreaIds(areaName: string, primaryAreaId: string): string[] {
+  const fallbackAreaIds: string[] = [];
+  const seenAreaIds = new Set<string>();
+
+  function addFallbackAreaId(areaId: string | null | undefined) {
+    if (!areaId || seenAreaIds.has(areaId)) {
+      return;
+    }
+
+    seenAreaIds.add(areaId);
+    fallbackAreaIds.push(areaId);
+  }
+
+  const startingArea = getAreaTaxonomy(areaName);
+  addFallbackAreaId(primaryAreaId);
+
+  if (startingArea?.parent_id) {
+    addFallbackAreaId(startingArea.parent_id);
+    const parentArea = getAreaTaxonomyById(startingArea.parent_id);
+    if (parentArea?.parent_id) {
+      addFallbackAreaId(parentArea.parent_id);
+    }
+  }
+
+  return fallbackAreaIds;
 }
 
 /**
@@ -64,25 +129,29 @@ export async function getHPI(
   month: number
 ): Promise<number | null> {
   const supabase = createServerClient();
-  const reportMonth = formatReportMonth(year, month);
+  const period = formatPeriod(year, month);
+  const normalized = normalizeLookupInputs(areaName, propertyCategory);
+  if (!normalized.areaId || !normalized.propertyTypeId) {
+    return null;
+  }
 
   const { data, error } = await supabase
     .from('market_hpi')
     .select('hpi_index')
-    .eq('area_name', areaName)
-    .eq('property_category', propertyCategory)
-    .eq('report_month', reportMonth)
+    .eq('area_id', normalized.areaId)
+    .eq('property_type_id', normalized.propertyTypeId)
+    .eq('period', period)
     .single();
 
   if (error || !data) {
     // Try to find the closest available month
     const { data: closest, error: closestError } = await supabase
       .from('market_hpi')
-      .select('hpi_index, report_month')
-      .eq('area_name', areaName)
-      .eq('property_category', propertyCategory)
-      .lte('report_month', reportMonth)
-      .order('report_month', { ascending: false })
+      .select('hpi_index, period')
+      .eq('area_id', normalized.areaId)
+      .eq('property_type_id', normalized.propertyTypeId)
+      .lte('period', period)
+      .order('period', { ascending: false })
       .limit(1)
       .single();
 
@@ -104,13 +173,17 @@ export async function getCurrentHPI(
   propertyCategory: string
 ): Promise<{ hpi: number; date: string } | null> {
   const supabase = createServerClient();
+  const normalized = normalizeLookupInputs(areaName, propertyCategory);
+  if (!normalized.areaId || !normalized.propertyTypeId) {
+    return null;
+  }
 
   const { data, error } = await supabase
     .from('market_hpi')
-    .select('hpi_index, report_month')
-    .eq('area_name', areaName)
-    .eq('property_category', propertyCategory)
-    .order('report_month', { ascending: false })
+    .select('hpi_index, period')
+    .eq('area_id', normalized.areaId)
+    .eq('property_type_id', normalized.propertyTypeId)
+    .order('period', { ascending: false })
     .limit(1)
     .single();
 
@@ -120,12 +193,36 @@ export async function getCurrentHPI(
 
   return {
     hpi: data.hpi_index,
-    date: data.report_month,
+    date: data.period,
   };
 }
 
 // Cache for getCurrentBenchmarkPrice - "current" is the same for any region/category combo
 const currentBenchmarkCache = new Map<string, { price: number; date: string }>();
+const currentMarketStatsCache = new Map<string, CurrentMarketStats>();
+
+function parseNumericField(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function readFirstNumericField(
+  row: Record<string, unknown>,
+  keys: string[]
+): number | null {
+  for (const key of keys) {
+    const value = parseNumericField(row[key]);
+    if (value !== null) {
+      return value;
+    }
+  }
+
+  return null;
+}
 
 /**
  * Get benchmark price for a specific region, property type, and date
@@ -139,20 +236,21 @@ export async function getBenchmarkPrice(
   month: number
 ): Promise<{ price: number; date: string } | null> {
   const supabase = createServerClient();
-  const reportMonth = formatReportMonth(year, month);
+  const period = formatPeriod(year, month);
+  const normalized = normalizeLookupInputs(areaName, propertyCategory);
+  if (!normalized.areaId || !normalized.propertyTypeId) {
+    return null;
+  }
   
-  // Get all possible names for this area (modern + historic codes)
-  const lookupKeys = getLookupKeys(areaName);
-  
-  console.log('[getBenchmarkPrice] Looking up:', { areaName, lookupKeys, propertyCategory, reportMonth });
+  console.log('[getBenchmarkPrice] Looking up:', { areaId: normalized.areaId, propertyTypeId: normalized.propertyTypeId, period });
   
   // Try exact match first
   const { data: exactMatch } = await supabase
     .from('market_hpi')
-    .select('benchmark_price, report_month')
-    .in('area_name', lookupKeys)
-    .eq('property_category', propertyCategory)
-    .eq('report_month', reportMonth)
+    .select('benchmark_price, period')
+    .eq('area_id', normalized.areaId)
+    .eq('property_type_id', normalized.propertyTypeId)
+    .eq('period', period)
     .not('benchmark_price', 'is', null)
     .limit(1)
     .single();
@@ -161,19 +259,19 @@ export async function getBenchmarkPrice(
     console.log('[getBenchmarkPrice] Found exact match:', exactMatch);
     return {
       price: Number(exactMatch.benchmark_price),
-      date: exactMatch.report_month,
+      date: exactMatch.period,
     };
   }
   
   // Try nearest prior month
   const { data: priorMatch } = await supabase
     .from('market_hpi')
-    .select('benchmark_price, report_month')
-    .in('area_name', lookupKeys)
-    .eq('property_category', propertyCategory)
-    .lte('report_month', reportMonth)
+    .select('benchmark_price, period')
+    .eq('area_id', normalized.areaId)
+    .eq('property_type_id', normalized.propertyTypeId)
+    .lte('period', period)
     .not('benchmark_price', 'is', null)
-    .order('report_month', { ascending: false })
+    .order('period', { ascending: false })
     .limit(1)
     .single();
   
@@ -181,19 +279,19 @@ export async function getBenchmarkPrice(
     console.log('[getBenchmarkPrice] Found prior match:', priorMatch);
     return {
       price: Number(priorMatch.benchmark_price),
-      date: priorMatch.report_month,
+      date: priorMatch.period,
     };
   }
   
   // Try nearest future month as last resort
   const { data: futureMatch } = await supabase
     .from('market_hpi')
-    .select('benchmark_price, report_month')
-    .in('area_name', lookupKeys)
-    .eq('property_category', propertyCategory)
-    .gte('report_month', reportMonth)
+    .select('benchmark_price, period')
+    .eq('area_id', normalized.areaId)
+    .eq('property_type_id', normalized.propertyTypeId)
+    .gte('period', period)
     .not('benchmark_price', 'is', null)
-    .order('report_month', { ascending: true })
+    .order('period', { ascending: true })
     .limit(1)
     .single();
   
@@ -201,11 +299,11 @@ export async function getBenchmarkPrice(
     console.log('[getBenchmarkPrice] Found future match:', futureMatch);
     return {
       price: Number(futureMatch.benchmark_price),
-      date: futureMatch.report_month,
+      date: futureMatch.period,
     };
   }
   
-  console.log('[getBenchmarkPrice] No benchmark data found for:', { areaName, propertyCategory, reportMonth });
+  console.log('[getBenchmarkPrice] No benchmark data found for:', { areaId: normalized.areaId, propertyTypeId: normalized.propertyTypeId, period });
   return null;
 }
 
@@ -217,27 +315,28 @@ export async function getCurrentBenchmarkPrice(
   areaName: string,
   propertyCategory: string
 ): Promise<{ price: number; date: string } | null> {
+  const normalized = normalizeLookupInputs(areaName, propertyCategory);
+  if (!normalized.areaId || !normalized.propertyTypeId) {
+    return null;
+  }
+
   // Check cache first
-  const cacheKey = `${areaName}:${propertyCategory}`;
+  const cacheKey = `${normalized.areaId}:${normalized.propertyTypeId}`;
   if (currentBenchmarkCache.has(cacheKey)) {
     console.log('[getCurrentBenchmarkPrice] Cache hit:', cacheKey);
     return currentBenchmarkCache.get(cacheKey)!;
   }
   
   const supabase = createServerClient();
-  
-  // Get all possible names for this area (modern + historic codes)
-  const lookupKeys = getLookupKeys(areaName);
-  
-  console.log('[getCurrentBenchmarkPrice] Looking up:', { areaName, lookupKeys, propertyCategory });
+  console.log('[getCurrentBenchmarkPrice] Looking up:', { areaId: normalized.areaId, propertyTypeId: normalized.propertyTypeId });
   
   const { data, error } = await supabase
     .from('market_hpi')
-    .select('benchmark_price, report_month')
-    .in('area_name', lookupKeys)
-    .eq('property_category', propertyCategory)
+    .select('benchmark_price, period')
+    .eq('area_id', normalized.areaId)
+    .eq('property_type_id', normalized.propertyTypeId)
     .not('benchmark_price', 'is', null)
-    .order('report_month', { ascending: false })
+    .order('period', { ascending: false })
     .limit(1)
     .single();
   
@@ -248,7 +347,7 @@ export async function getCurrentBenchmarkPrice(
   
   const result = {
     price: Number(data.benchmark_price),
-    date: data.report_month,
+    date: data.period,
   };
   
   // Cache the result
@@ -265,6 +364,105 @@ export function clearBenchmarkCache(): void {
   currentBenchmarkCache.clear();
 }
 
+export async function getRecentMarketSnapshots(
+  areaName: string,
+  propertyCategory: string,
+  limit: number = 2
+): Promise<MarketSnapshot[]> {
+  const supabase = createServerClient();
+  const normalized = normalizeLookupInputs(areaName, propertyCategory);
+  if (!normalized.areaId || !normalized.propertyTypeId) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from('market_hpi')
+    .select('period, hpi_index, benchmark_price')
+    .eq('area_id', normalized.areaId)
+    .eq('property_type_id', normalized.propertyTypeId)
+    .order('period', { ascending: false })
+    .limit(limit);
+
+  if (error || !data) {
+    return [];
+  }
+
+  return data.map((row) => ({
+    reportMonth: row.period,
+    hpiIndex: row.hpi_index,
+    benchmarkPrice: row.benchmark_price,
+  }));
+}
+
+export async function getRecentMarketStats(
+  areaName: string,
+  propertyCategory: string,
+  limit: number = 2
+): Promise<CurrentMarketStats[]> {
+  const normalized = normalizeLookupInputs(areaName, propertyCategory);
+  if (!normalized.areaId || !normalized.propertyTypeId) {
+    return [];
+  }
+
+  const supabase = createServerClient();
+  const fallbackAreaIds = getFallbackAreaIds(areaName, normalized.areaId);
+
+  for (const [index, areaId] of fallbackAreaIds.entries()) {
+    const { data, error } = await supabase
+      .from('market_watch_monthly')
+      .select('sales, new_listings, active_listings, avg_sold_price, dom, snlr, moi, period')
+      .eq('area_id', areaId)
+      .eq('property_type_id', normalized.propertyTypeId)
+      .order('period', { ascending: false })
+      .limit(limit);
+
+    if (error || !data || data.length === 0) {
+      continue;
+    }
+
+    const area = getAreaTaxonomyById(areaId);
+    return data.map((row) => ({
+      sales: parseNumericField(row.sales),
+      newListings: parseNumericField(row.new_listings),
+      activeListings: parseNumericField(row.active_listings),
+      averageSoldPrice: parseNumericField(row.avg_sold_price),
+      medianPrice: null,
+      averageDaysOnMarket: parseNumericField(row.dom),
+      salesToNewListingsRatio: parseNumericField(row.snlr),
+      monthsOfInventory: parseNumericField(row.moi),
+      reportMonth: typeof row.period === 'string' ? row.period : null,
+      scopeAreaName: area?.display_name ?? null,
+      scopeLevel: (area?.area_level as CurrentMarketStats['scopeLevel']) ?? null,
+      isFallback: index > 0,
+    }));
+  }
+
+  return [];
+}
+
+export async function getCurrentMarketStats(
+  areaName: string,
+  propertyCategory: string
+): Promise<CurrentMarketStats | null> {
+  const normalized = normalizeLookupInputs(areaName, propertyCategory);
+  if (!normalized.areaId || !normalized.propertyTypeId) {
+    return null;
+  }
+
+  const cacheKey = `${normalized.areaId}:${normalized.propertyTypeId}`;
+  if (currentMarketStatsCache.has(cacheKey)) {
+    return currentMarketStatsCache.get(cacheKey)!;
+  }
+
+  const [currentStats] = await getRecentMarketStats(areaName, propertyCategory, 1);
+  if (currentStats) {
+    currentMarketStatsCache.set(cacheKey, currentStats);
+    return currentStats;
+  }
+
+  return null;
+}
+
 /**
  * Get HPI trend data from a starting date to the most recent available
  */
@@ -275,22 +473,26 @@ export async function getHPITrend(
   fromMonth: number
 ): Promise<HPIDataPoint[]> {
   const supabase = createServerClient();
-  const fromReportMonth = formatReportMonth(fromYear, fromMonth);
+  const fromPeriod = formatPeriod(fromYear, fromMonth);
+  const normalized = normalizeLookupInputs(areaName, propertyCategory);
+  if (!normalized.areaId || !normalized.propertyTypeId) {
+    return [];
+  }
 
   const { data, error } = await supabase
     .from('market_hpi')
-    .select('report_month, hpi_index, benchmark_price')
-    .eq('area_name', areaName)
-    .eq('property_category', propertyCategory)
-    .gte('report_month', fromReportMonth)
-    .order('report_month', { ascending: true });
+    .select('period, hpi_index, benchmark_price')
+    .eq('area_id', normalized.areaId)
+    .eq('property_type_id', normalized.propertyTypeId)
+    .gte('period', fromPeriod)
+    .order('period', { ascending: true });
 
   if (error || !data) {
     return [];
   }
 
   return data.map((row) => ({
-    reportMonth: row.report_month,
+    reportMonth: row.period,
     hpiIndex: row.hpi_index,
     benchmarkPrice: row.benchmark_price,
   }));
@@ -447,24 +649,28 @@ export async function getHPIDateRange(
   propertyCategory: string
 ): Promise<{ earliest: string; latest: string } | null> {
   const supabase = createServerClient();
+  const normalized = normalizeLookupInputs(areaName, propertyCategory);
+  if (!normalized.areaId || !normalized.propertyTypeId) {
+    return null;
+  }
 
   // Get earliest
   const { data: earliest } = await supabase
     .from('market_hpi')
-    .select('report_month')
-    .eq('area_name', areaName)
-    .eq('property_category', propertyCategory)
-    .order('report_month', { ascending: true })
+    .select('period')
+    .eq('area_id', normalized.areaId)
+    .eq('property_type_id', normalized.propertyTypeId)
+    .order('period', { ascending: true })
     .limit(1)
     .single();
 
   // Get latest
   const { data: latest } = await supabase
     .from('market_hpi')
-    .select('report_month')
-    .eq('area_name', areaName)
-    .eq('property_category', propertyCategory)
-    .order('report_month', { ascending: false })
+    .select('period')
+    .eq('area_id', normalized.areaId)
+    .eq('property_type_id', normalized.propertyTypeId)
+    .order('period', { ascending: false })
     .limit(1)
     .single();
 
@@ -473,8 +679,8 @@ export async function getHPIDateRange(
   }
 
   return {
-    earliest: earliest.report_month,
-    latest: latest.report_month,
+    earliest: earliest.period,
+    latest: latest.period,
   };
 }
 

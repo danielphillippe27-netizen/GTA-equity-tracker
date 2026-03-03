@@ -15,6 +15,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
+type NeighborhoodOption = {
+  id: string;
+  display_name: string;
+  parent_display_name: string;
+};
+
 // Month names for the selector
 const MONTHS = [
   { value: 1, label: 'January' },
@@ -42,7 +48,11 @@ export function PropertyInput() {
   const { data, updateData, error } = useFunnel();
   const [regions, setRegions] = useState<string[]>([]);
   const [propertyTypes, setPropertyTypes] = useState<string[]>([]);
+  const [neighborhoodOptions, setNeighborhoodOptions] = useState<NeighborhoodOption[]>([]);
   const [isLoadingOptions, setIsLoadingOptions] = useState(true);
+  const filteredNeighborhoods = neighborhoodOptions.filter(
+    (option) => option.parent_display_name === data.region
+  );
 
   // Fetch available regions and property types from the database
   useEffect(() => {
@@ -54,18 +64,29 @@ export function PropertyInput() {
           const data = await response.json();
           setRegions(data.regions || []);
           setPropertyTypes(data.propertyTypes || []);
+          setNeighborhoodOptions(data.neighborhoodOptions || []);
         }
       } catch (err) {
         console.error('Failed to fetch HPI options:', err);
         // Set fallback options
         setRegions(['Brampton', 'Mississauga', 'City of Toronto']);
         setPropertyTypes(['Detached', 'Semi-Detached', 'Townhouse', 'Condo Apt']);
+        setNeighborhoodOptions([]);
       } finally {
         setIsLoadingOptions(false);
       }
     }
     fetchOptions();
   }, []);
+
+  useEffect(() => {
+    if (
+      data.neighborhood &&
+      !filteredNeighborhoods.some((option) => option.display_name === data.neighborhood)
+    ) {
+      updateData({ neighborhood: '' });
+    }
+  }, [data.neighborhood, filteredNeighborhoods, updateData]);
 
   // Handle purchase price change
   const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -97,7 +118,7 @@ export function PropertyInput() {
           </Label>
           <Select
             value={data.region}
-            onValueChange={(value) => updateData({ region: value })}
+            onValueChange={(value) => updateData({ region: value, neighborhood: '' })}
             disabled={isLoadingOptions}
           >
             <SelectTrigger className="w-full bg-surface border-border">
@@ -112,6 +133,45 @@ export function PropertyInput() {
             </SelectContent>
           </Select>
         </motion.div>
+
+        {data.region && filteredNeighborhoods.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.05 }}
+          >
+            <div className="mb-2 flex items-center justify-between">
+              <Label htmlFor="neighborhood" className="text-foreground block">
+                Neighborhood
+              </Label>
+              {data.neighborhood && (
+                <button
+                  type="button"
+                  onClick={() => updateData({ neighborhood: '' })}
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <Select
+              value={data.neighborhood || ''}
+              onValueChange={(value) => updateData({ neighborhood: value })}
+              disabled={isLoadingOptions}
+            >
+              <SelectTrigger className="w-full bg-surface border-border">
+                <SelectValue placeholder="Select neighborhood (optional)..." />
+              </SelectTrigger>
+              <SelectContent className="max-h-60 bg-surface-elevated border-border">
+                {filteredNeighborhoods.map((neighborhood) => (
+                  <SelectItem key={neighborhood.id} value={neighborhood.display_name}>
+                    {neighborhood.display_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </motion.div>
+        )}
 
         {/* Property Type */}
         <motion.div

@@ -6,9 +6,11 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/lib/auth/AuthProvider';
 import { supabase } from '@/lib/supabase/client';
+import { MarketPulse } from '@/components/report';
 import { GlowButton, GradientText } from '@/components/shared';
 import { formatCurrency } from '@/lib/constants';
 import { TrendingUp, Home, LogOut, LineChart, Calendar } from 'lucide-react';
+import type { CurrentMarketStats } from '@/lib/estimation/hpi';
 
 interface Profile {
   id: string;
@@ -24,10 +26,18 @@ interface Profile {
       interestRate: number;
       amortization: number;
       downPayment: number;
+      secondaryMortgageBalance?: number;
+      helocBalance?: number;
     };
     netEquity?: number;
   };
   primary_estimate_id: string | null;
+}
+
+interface EstimateResponse {
+  result?: {
+    currentMarketStats?: CurrentMarketStats;
+  };
 }
 
 export default function DashboardPage() {
@@ -35,6 +45,7 @@ export default function DashboardPage() {
   const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
+  const [marketStats, setMarketStats] = useState<CurrentMarketStats | null>(null);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -66,6 +77,32 @@ export default function DashboardPage() {
       fetchProfile();
     }
   }, [user]);
+
+  useEffect(() => {
+    async function fetchMarketStats() {
+      const estimateId = profile?.property_data?.estimateId ?? profile?.primary_estimate_id;
+      if (!estimateId) {
+        setMarketStats(null);
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/estimate?id=${estimateId}`);
+        if (!response.ok) {
+          return;
+        }
+
+        const data = (await response.json()) as EstimateResponse;
+        setMarketStats(data.result?.currentMarketStats ?? null);
+      } catch (error) {
+        console.error('Error fetching market stats:', error);
+      }
+    }
+
+    if (profile) {
+      void fetchMarketStats();
+    }
+  }, [profile]);
 
   // Handle sign out
   const handleSignOut = async () => {
@@ -200,6 +237,24 @@ export default function DashboardPage() {
             )}
           </div>
         </motion.section>
+
+        {propertyData.netEquity && (
+          <motion.section
+            className="mb-8"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, delay: 0.18 }}
+          >
+            <MarketPulse
+              averageSoldPrice={marketStats?.averageSoldPrice ?? null}
+              averageDaysOnMarket={marketStats?.averageDaysOnMarket ?? null}
+              monthsOfInventory={marketStats?.monthsOfInventory ?? null}
+              reportMonth={marketStats?.reportMonth ?? null}
+              scopeAreaName={marketStats?.scopeAreaName ?? null}
+              isFallback={marketStats?.isFallback ?? false}
+            />
+          </motion.section>
+        )}
 
         {/* Monthly Tracking Info */}
         {propertyData.netEquity && (

@@ -15,6 +15,7 @@ import { getSessionId } from '@/lib/session';
 // Funnel data shape (HPI-based)
 export interface FunnelData {
   region: string;
+  neighborhood?: string;
   propertyType: string;
   purchaseYear: number | null;
   purchaseMonth: number | null;
@@ -49,6 +50,7 @@ const initialState: FunnelState = {
   sessionId: null,
   data: {
     region: '',
+    neighborhood: '',
     propertyType: '',
     purchaseYear: null,
     purchaseMonth: null,

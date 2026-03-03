@@ -2,7 +2,9 @@
 
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { User, Session, AuthError } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase/client';
+import {
+  supabase,
+} from '@/lib/supabase/client';
 
 interface AuthContextType {
   user: User | null;
@@ -15,7 +17,7 @@ interface AuthContextType {
       propertyData?: Record<string, unknown>;
       redirectTo?: string;
     }
-  ) => Promise<{ error: AuthError | null }>;
+  ) => Promise<{ error: AuthError | Error | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -59,18 +61,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         options?.redirectTo ||
         `${window.location.origin}/auth/callback?next=/dashboard`;
 
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: redirectTo,
-          data: {
+      try {
+        const response = await fetch('/api/auth/magic-link', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email,
+            redirectTo,
             name: options?.name || '',
             propertyData: options?.propertyData || {},
-          },
-        },
-      });
+          }),
+        });
 
-      return { error };
+        if (!response.ok) {
+          const data = (await response.json().catch(() => null)) as
+            | { error?: string }
+            | null;
+
+          return {
+            error: new Error(
+              data?.error || 'Unable to send your sign-in link right now.'
+            ),
+          };
+        }
+
+        return { error: null };
+      } catch (error) {
+        return {
+          error:
+            error instanceof Error
+              ? error
+              : new Error('Unable to send your sign-in link right now.'),
+        };
+      }
     },
     []
   );

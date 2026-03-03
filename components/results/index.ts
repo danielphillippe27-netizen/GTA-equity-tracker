@@ -8,3 +8,4 @@ export { MethodologyModal } from './MethodologyModal';
 export { MortgageAssumptions } from './MortgageAssumptions';
 export { EquityTeaser } from './EquityTeaser';
 export { EquityUnlockForm } from './EquityUnlockForm';
+export { FreeEvalCTA } from './FreeEvalCTA';

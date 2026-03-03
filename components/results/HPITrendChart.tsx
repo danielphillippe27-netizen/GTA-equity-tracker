@@ -12,6 +12,7 @@ import {
   ReferenceDot,
 } from 'recharts';
 import { HPIDataPoint } from '@/lib/estimation/hpi';
+import { InfoTooltip } from '@/components/shared';
 
 interface HPITrendChartProps {
   data: HPIDataPoint[];
@@ -19,6 +20,10 @@ interface HPITrendChartProps {
   purchaseHPI: number;
   currentHPI: number;
   className?: string;
+  title?: string;
+  description?: string;
+  tooltipContent?: string;
+  height?: number;
 }
 
 // Custom tooltip component
@@ -52,6 +57,10 @@ export function HPITrendChart({
   purchaseHPI,
   currentHPI,
   className,
+  title = 'HPI Trend',
+  description = 'Home Price Index from your purchase date to today',
+  tooltipContent,
+  height = 256,
 }: HPITrendChartProps) {
   // Transform data for chart
   const chartData = useMemo(() => {
@@ -94,15 +103,20 @@ export function HPITrendChart({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay: 0.2 }}
     >
-      <h3 className="text-lg font-semibold text-foreground mb-2">
-        HPI Trend
-      </h3>
-      <p className="text-sm text-muted-foreground mb-4">
-        Home Price Index from your purchase date to today
-      </p>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-semibold text-foreground mb-2">
+            {title}
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            {description}
+          </p>
+        </div>
+        {tooltipContent ? <InfoTooltip content={tooltipContent} className="mt-1" /> : null}
+      </div>
 
-      <div className="h-64 w-full" style={{ minHeight: '256px', minWidth: '100px' }}>
-        <ResponsiveContainer width="100%" height={256}>
+      <div className="w-full" style={{ minHeight: `${height}px`, minWidth: '100px' }}>
+        <ResponsiveContainer width="100%" height={height}>
           <AreaChart
             data={chartData}
             margin={{ top: 10, right: 10, left: 0, bottom: 0 }}

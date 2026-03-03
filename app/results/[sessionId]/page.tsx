@@ -1,26 +1,43 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
-import { HPITrendChart, EquityUnlockForm, MethodologyModal } from '@/components/results';
-import { GlowButton, GradientText, InfoTooltip } from '@/components/shared';
+import { ShieldCheck } from 'lucide-react';
+import {
+  CalculationDetailsDisclosure,
+  ClientEquityHero,
+  EquitySnapshot,
+  HpiTrend,
+  MarketPulse,
+} from '@/components/report';
+import { FreeEvalCTA } from '@/components/results';
+import { GlowButton } from '@/components/shared';
 import { formatCurrency } from '@/lib/constants';
-import { HPIEstimateResult, MarketScenario } from '@/lib/estimation/hpi';
+import { CurrentMarketStats, HPIEstimateResult } from '@/lib/estimation/hpi';
+import {
+  getLatestEstimateResult,
+  getLatestPropertyData,
+  setLatestPropertyData,
+  type EstimatePropertyData,
+} from '@/lib/estimate-storage';
+import {
+  calculateMonthlyPayment,
+  calculateMortgageSummary,
+  calculateRemainingBalance,
+  calculateNetEquity,
+} from '@/lib/calculation/mortgage-calculator';
 
-type MarketPhase = 'hot' | 'balanced' | 'soft';
-
-// Extended result type with bridge calculator fields
 interface BridgeEstimateResult extends HPIEstimateResult {
   dataEra?: 'historic' | 'hpi';
   dataSource?: string;
   bridgeNote?: string;
-  // Regional benchmark prices from market_hpi table
   benchmarkAtPurchase?: number | null;
   benchmarkAtPurchaseDate?: string | null;
   benchmarkCurrent?: number | null;
   benchmarkCurrentDate?: string | null;
+  currentMarketStats?: CurrentMarketStats;
 }
 
 interface ApiHPIResult {
@@ -28,89 +45,218 @@ interface ApiHPIResult {
   result: BridgeEstimateResult;
 }
 
+interface EditableMortgageAssumptions {
+  interestRate: number;
+  amortization: number;
+  downPayment: number;
+  secondaryMortgageBalance: number;
+  helocBalance: number;
+}
+
+function formatPurchaseLabel(year: number, month: number) {
+  return new Date(year, month - 1).toLocaleString('en-US', {
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+function formatPeriodLabel(period: string) {
+  const [year, month] = period.split('-');
+  if (!year || !month) {
+    return period;
+  }
+
+  return new Date(Number(year), Number(month) - 1).toLocaleString('en-US', {
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+function buildInterpretation({
+  purchaseLabel,
+  region,
+  propertyType,
+  estimatedValue,
+  marketChangePercent,
+  netEquity,
+  mortgageAvailable,
+}: {
+  purchaseLabel: string;
+  region: string;
+  propertyType: string;
+  estimatedValue: number;
+  marketChangePercent: number | null;
+  netEquity: number | null;
+  mortgageAvailable: boolean;
+}) {
+  const movementText =
+    marketChangePercent === null
+      ? `Since ${purchaseLabel}, benchmark pricing for ${propertyType.toLowerCase()} homes in ${region} has moved based on the latest available TRREB benchmark data.`
+      : `Since ${purchaseLabel}, benchmark pricing for ${propertyType.toLowerCase()} homes in ${region} has moved ${marketChangePercent >= 0 ? 'up' : 'down'} ${Math.abs(marketChangePercent).toFixed(1)}%.`;
+
+  if (!mortgageAvailable || netEquity === null) {
+    return `${movementText} Your estimated home value is about ${formatCurrency(estimatedValue)}. Mortgage balance and net equity need the saved mortgage assumptions from your original estimate session.`;
+  }
+
+  return `${movementText} Based on your mortgage assumptions, that leaves about ${formatCurrency(netEquity)} in estimated equity today, built from both market movement and principal paydown.`;
+}
+
 export default function ResultsPage() {
   const params = useParams();
   const estimateId = params.sessionId as string;
 
   const [result, setResult] = useState<BridgeEstimateResult | null>(null);
+  const [propertyData, setPropertyData] = useState<EstimatePropertyData | null>(null);
+  const [editableAssumptions, setEditableAssumptions] = useState<EditableMortgageAssumptions | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showMethodology, setShowMethodology] = useState(false);
-  const [selectedScenario, setSelectedScenario] = useState<MarketPhase>('balanced');
 
-  // Ref to prevent double-fetch in React Strict Mode
   const hasFetchedRef = useRef(false);
 
   useEffect(() => {
-    // Prevent double-fetch in React Strict Mode
     if (hasFetchedRef.current) {
-      console.log('[ResultsPage] Already fetched, skipping');
       return;
     }
 
     async function fetchEstimate() {
       hasFetchedRef.current = true;
+      let hasLocalResult = false;
 
-      // First check sessionStorage for cached result
+      const latestPropertyData = getLatestPropertyData();
+      if (latestPropertyData?.estimateId === estimateId) {
+        setPropertyData(latestPropertyData);
+      }
+
+      const latestEstimateResult = getLatestEstimateResult();
+      if (latestEstimateResult?.estimateId === estimateId) {
+        setResult(latestEstimateResult.result as BridgeEstimateResult);
+        hasLocalResult = true;
+      }
+
       if (typeof window !== 'undefined') {
-        const cachedResult = sessionStorage.getItem(`estimate_${estimateId}`);
+        const cachedResult = window.sessionStorage.getItem(`estimate_${estimateId}`);
         if (cachedResult) {
-          console.log('[ResultsPage] Found cached result in sessionStorage');
           try {
             const parsed = JSON.parse(cachedResult) as BridgeEstimateResult;
             setResult(parsed);
-            setLoading(false);
-            // Clear the cache after successful use
-            sessionStorage.removeItem(`estimate_${estimateId}`);
-            return;
-          } catch (parseErr) {
-            console.error('[ResultsPage] Failed to parse cached result:', parseErr);
+            hasLocalResult = true;
+            window.sessionStorage.removeItem(`estimate_${estimateId}`);
+          } catch {
+            setError('Unable to read your saved estimate. Please try again.');
           }
         }
       }
 
-      // If no cache, try fetching from API
-      console.log('[ResultsPage] No cache found, fetching from API');
+      if (hasLocalResult) {
+        setLoading(false);
+      }
+
       try {
-        const response = await fetch(`/api/estimate?id=${estimateId}`);
-        
-        if (!response.ok) {
-          throw new Error('Estimate not found');
+        const estimateResponse = await fetch(`/api/estimate?id=${estimateId}`);
+
+        if (!estimateResponse.ok) {
+          const data = await estimateResponse.json().catch(() => null);
+          if (!hasLocalResult) {
+            setError(data?.error || 'Estimate not found');
+          }
+          return;
         }
 
-        const data: ApiHPIResult = await response.json();
+        const data: ApiHPIResult = await estimateResponse.json();
         setResult(data.result);
-      } catch (err) {
-        console.error('[ResultsPage] Failed to fetch estimate:', err);
-        setError('Unable to load your estimate. Please try again.');
+      } catch {
+        if (!hasLocalResult) {
+          setError('Unable to load your estimate. Please try again.');
+        }
       } finally {
         setLoading(false);
       }
     }
 
-    if (estimateId) {
-      fetchEstimate();
-    }
+    void fetchEstimate();
   }, [estimateId]);
 
-  // Loading state
+  useEffect(() => {
+    if (!propertyData) {
+      return;
+    }
+
+    setEditableAssumptions((current) => {
+      if (current) {
+        return current;
+      }
+
+      return {
+        interestRate: propertyData.mortgageAssumptions.interestRate,
+        amortization: propertyData.mortgageAssumptions.amortization,
+        downPayment: propertyData.mortgageAssumptions.downPayment,
+        secondaryMortgageBalance: propertyData.mortgageAssumptions.secondaryMortgageBalance ?? 0,
+        helocBalance: propertyData.mortgageAssumptions.helocBalance ?? 0,
+      };
+    });
+  }, [propertyData]);
+
+  useEffect(() => {
+    if (!propertyData || !editableAssumptions) {
+      return;
+    }
+
+    setLatestPropertyData({
+      ...propertyData,
+      mortgageAssumptions: {
+        ...propertyData.mortgageAssumptions,
+        interestRate: editableAssumptions.interestRate,
+        amortization: editableAssumptions.amortization,
+        downPayment: editableAssumptions.downPayment,
+        secondaryMortgageBalance: editableAssumptions.secondaryMortgageBalance,
+        helocBalance: editableAssumptions.helocBalance,
+      },
+    });
+  }, [editableAssumptions, propertyData]);
+
+  const mortgagePosition = useMemo(() => {
+    if (!propertyData || !result || !editableAssumptions) {
+      return null;
+    }
+
+    const summary = calculateMortgageSummary({
+      purchasePrice: propertyData.purchasePrice,
+      purchaseYear: propertyData.purchaseYear,
+      purchaseMonth: propertyData.purchaseMonth,
+      interestRate: editableAssumptions.interestRate,
+      amortizationYears: editableAssumptions.amortization,
+      downPaymentAmount: editableAssumptions.downPayment,
+    });
+    const secondaryMortgageBalance = editableAssumptions.secondaryMortgageBalance;
+    const helocBalance = editableAssumptions.helocBalance;
+    const totalOutstandingDebt =
+      summary.remainingBalance + secondaryMortgageBalance + helocBalance;
+
+    return {
+      summary,
+      secondaryMortgageBalance,
+      helocBalance,
+      totalOutstandingDebt,
+      netEquity: calculateNetEquity(result.estimatedCurrentValue, totalOutstandingDebt),
+    };
+  }, [editableAssumptions, propertyData, result]);
+
   if (loading) {
     return (
-      <main className="min-h-screen bg-background flex items-center justify-center">
+      <main className="flex min-h-screen items-center justify-center bg-background">
         <div className="text-center">
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-muted border-t-accent-blue mx-auto mb-4" />
+          <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-muted border-t-accent-blue" />
           <p className="text-muted-foreground">Loading your estimate...</p>
         </div>
       </main>
     );
   }
 
-  // Error state
   if (error || !result) {
     return (
-      <main className="min-h-screen bg-background flex items-center justify-center px-4">
-        <div className="text-center max-w-md">
-          <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-4">
+      <main className="flex min-h-screen items-center justify-center bg-background px-4">
+        <div className="max-w-md text-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10">
             <svg
               className="h-8 w-8 text-destructive"
               fill="none"
@@ -125,10 +271,8 @@ export default function ResultsPage() {
               />
             </svg>
           </div>
-          <h1 className="text-xl font-semibold text-foreground mb-2">
-            Estimate Not Found
-          </h1>
-          <p className="text-muted-foreground mb-6">
+          <h1 className="mb-2 text-xl font-semibold text-foreground">Estimate Not Found</h1>
+          <p className="mb-6 text-muted-foreground">
             {error || "We couldn't find this estimate. It may have expired or the link is incorrect."}
           </p>
           <Link href="/">
@@ -139,26 +283,108 @@ export default function ResultsPage() {
     );
   }
 
-  // Get current scenario data
-  const currentScenario: MarketScenario = result.scenarios?.[selectedScenario] || {
-    value: result.estimatedCurrentValue,
-    equity: result.equityGained,
-    adjustment: 0,
-    label: 'Current Estimate',
-  };
-
-  // Format purchase date
-  const purchaseDateFormatted = new Date(result.input.purchaseYear, result.input.purchaseMonth - 1)
-    .toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const purchaseLabel = formatPurchaseLabel(result.input.purchaseYear, result.input.purchaseMonth);
+  const marketChangePercent =
+    result.hpiAtPurchase > 0 ? ((result.hpiCurrent / result.hpiAtPurchase) - 1) * 100 : null;
+  const benchmarkRangeLow = mortgagePosition
+    ? calculateNetEquity(result.scenarios.soft.value, mortgagePosition.totalOutstandingDebt)
+    : null;
+  const benchmarkRangeHigh = mortgagePosition
+    ? calculateNetEquity(result.scenarios.hot.value, mortgagePosition.totalOutstandingDebt)
+    : null;
+  const previousTrendPoint =
+    result.hpiTrend && result.hpiTrend.length > 1
+      ? result.hpiTrend[result.hpiTrend.length - 2]
+      : null;
+  const monthOverMonthValuePercent =
+    previousTrendPoint && previousTrendPoint.hpiIndex > 0
+      ? ((result.hpiCurrent / previousTrendPoint.hpiIndex) - 1) * 100
+      : null;
+  const previousMortgageBalance = mortgagePosition
+    ? calculateRemainingBalance(
+        mortgagePosition.summary.originalMortgage,
+        mortgagePosition.summary.interestRate,
+        mortgagePosition.summary.amortizationYears,
+        Math.max(0, mortgagePosition.summary.monthsElapsed - 1)
+      )
+    : null;
+  const monthlyMortgagePaydown =
+    previousMortgageBalance !== null && mortgagePosition
+      ? previousMortgageBalance - mortgagePosition.summary.remainingBalance
+      : null;
+  const previousTotalDebt =
+    previousMortgageBalance !== null && mortgagePosition
+      ? previousMortgageBalance +
+        mortgagePosition.secondaryMortgageBalance +
+        mortgagePosition.helocBalance
+      : null;
+  const previousEstimatedValue =
+    monthOverMonthValuePercent !== null
+      ? result.estimatedCurrentValue / (1 + monthOverMonthValuePercent / 100)
+      : null;
+  const previousNetEquity =
+    previousEstimatedValue !== null && previousTotalDebt !== null
+      ? calculateNetEquity(previousEstimatedValue, previousTotalDebt)
+      : null;
+  const monthlyEquityChange =
+    previousNetEquity !== null && mortgagePosition
+      ? mortgagePosition.netEquity - previousNetEquity
+      : null;
+  const originalAssumptions: EditableMortgageAssumptions | null = propertyData
+    ? {
+        interestRate: propertyData.mortgageAssumptions.interestRate,
+        amortization: propertyData.mortgageAssumptions.amortization,
+        downPayment: propertyData.mortgageAssumptions.downPayment,
+        secondaryMortgageBalance: propertyData.mortgageAssumptions.secondaryMortgageBalance ?? 0,
+        helocBalance: propertyData.mortgageAssumptions.helocBalance ?? 0,
+      }
+    : null;
+  const refinanceRate = 5.25;
+  const remainingAmortizationYears =
+    mortgagePosition && editableAssumptions
+      ? Math.max(
+          1,
+          (editableAssumptions.amortization * 12 - mortgagePosition.summary.monthsElapsed) / 12
+        )
+      : null;
+  const currentEstimatedDebtPayment =
+    mortgagePosition && editableAssumptions && remainingAmortizationYears !== null
+      ? calculateMonthlyPayment(
+          mortgagePosition.totalOutstandingDebt,
+          editableAssumptions.interestRate,
+          remainingAmortizationYears
+        )
+      : null;
+  const refinancePayment =
+    mortgagePosition && remainingAmortizationYears !== null
+      ? calculateMonthlyPayment(
+          mortgagePosition.totalOutstandingDebt,
+          refinanceRate,
+          remainingAmortizationYears
+        )
+      : null;
+  const refinanceDelta =
+    refinancePayment !== null && currentEstimatedDebtPayment !== null
+      ? refinancePayment - currentEstimatedDebtPayment
+      : null;
+  const interpretation = buildInterpretation({
+    purchaseLabel,
+    region: result.input.region,
+    propertyType: result.input.propertyType,
+    estimatedValue: result.estimatedCurrentValue,
+    marketChangePercent,
+    netEquity: mortgagePosition?.netEquity ?? null,
+    mortgageAvailable: Boolean(mortgagePosition),
+  });
+  const marketStats = result.currentMarketStats;
 
   return (
     <main className="min-h-screen bg-background">
-      {/* Background gradient */}
-      <div className="fixed inset-0 bg-hero-gradient opacity-30 pointer-events-none" />
+      <div className="pointer-events-none fixed inset-0 bg-hero-gradient opacity-30" />
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.14),_transparent_40%),radial-gradient(circle_at_80%_20%,_rgba(59,130,246,0.12),_transparent_30%)]" />
 
-      {/* Header */}
       <header className="sticky top-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-sm">
-        <div className="mx-auto max-w-4xl px-4 py-4 flex items-center justify-between">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
           <Link href="/" className="text-lg font-semibold text-foreground">
             GTA Equity Tracker
           </Link>
@@ -170,225 +396,130 @@ export default function ResultsPage() {
         </div>
       </header>
 
-      {/* Content */}
-      <div className="relative z-10 mx-auto max-w-4xl px-4 pb-16">
-        {/* Hero Section */}
-        <section className="relative py-8 sm:py-12 text-center">
-          <motion.div
+      <div className="relative z-10 mx-auto max-w-6xl px-4 pb-16">
+        <motion.section
+          className="py-8 sm:py-10"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+        >
+          <div className="grid gap-6 lg:grid-cols-[1.7fr_1fr]">
+            <ClientEquityHero
+              area={result.input.region}
+              neighborhood={propertyData?.neighborhood ?? null}
+              propertyType={result.input.propertyType}
+              purchaseLabel={purchaseLabel}
+              estimatedValue={result.estimatedCurrentValue}
+              mortgageBalance={mortgagePosition?.totalOutstandingDebt ?? null}
+              netEquity={mortgagePosition?.netEquity ?? null}
+              monthOverMonthValuePercent={monthOverMonthValuePercent}
+              monthlyMortgagePaydown={monthlyMortgagePaydown}
+              monthlyEquityChange={monthlyEquityChange}
+              interpretation={interpretation}
+            />
+
+            <MarketPulse
+              averageSoldPrice={marketStats?.averageSoldPrice ?? null}
+              averageDaysOnMarket={marketStats?.averageDaysOnMarket ?? null}
+              monthsOfInventory={marketStats?.monthsOfInventory ?? null}
+              reportMonth={marketStats?.reportMonth ?? null}
+              scopeAreaName={marketStats?.scopeAreaName ?? null}
+              isFallback={marketStats?.isFallback ?? false}
+            />
+          </div>
+        </motion.section>
+
+        {result.hpiTrend && result.hpiTrend.length > 0 ? (
+          <motion.section
+            className="mb-8"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
+            transition={{ duration: 0.5, delay: 0.15 }}
           >
-            <p className="text-sm text-muted-foreground mb-2">
-              Your Market-Indexed Equity Report
-            </p>
-            <h1 className="text-xl sm:text-2xl font-bold text-foreground mb-1">
-              {result.input.region} &bull; {result.input.propertyType}
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              Purchased {purchaseDateFormatted}
-            </p>
-          </motion.div>
-        </section>
+            <HpiTrend
+              data={result.hpiTrend}
+              purchaseDate={`${result.input.purchaseYear}-${result.input.purchaseMonth.toString().padStart(2, '0')}-01`}
+              purchaseHpi={result.hpiAtPurchase}
+              currentHpi={result.hpiCurrent}
+            />
+          </motion.section>
+        ) : null}
 
-        {/* Main Estimate Card */}
         <motion.section
           className="mb-8"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.1 }}
         >
-          <div className="p-6 sm:p-8 rounded-2xl bg-gradient-to-br from-accent-blue/10 to-accent-cyan/10 border border-accent-blue/20">
-            {/* Main Value Display */}
-            <div className="text-center mb-6">
-              <p className="text-sm text-muted-foreground mb-1">Estimated Current Value</p>
-              <div className="text-4xl sm:text-5xl md:text-6xl font-bold mb-2">
-                <GradientText>{formatCurrency(currentScenario.value)}</GradientText>
-              </div>
-              
-              {/* How is this calculated? Link */}
-              <button
-                onClick={() => setShowMethodology(true)}
-                className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-accent-cyan transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                How is this calculated?
-              </button>
-            </div>
-
-            {/* Equity Display */}
-            <div className="grid sm:grid-cols-2 gap-4 mb-6">
-              <div className="p-4 rounded-xl bg-background/50">
-                <p className="text-xs text-muted-foreground mb-1">Original Purchase</p>
-                <p className="text-xl font-bold text-foreground">
-                  {formatCurrency(result.input.purchasePrice)}
-                </p>
-              </div>
-              <div className="p-4 rounded-xl bg-background/50">
-                <p className="text-xs text-muted-foreground mb-1">Equity Gained</p>
-                <p className={`text-xl font-bold ${currentScenario.equity >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {currentScenario.equity >= 0 ? '+' : ''}{formatCurrency(currentScenario.equity)}
-                </p>
-              </div>
-            </div>
-
-            {/* Scenario Toggles */}
-            <div className="border-t border-accent-blue/20 pt-6">
-              <p className="text-xs text-muted-foreground text-center mb-4">
-                Market Scenario
-              </p>
-              <div className="flex gap-2 justify-center flex-wrap">
-                <ScenarioButton
-                  scenario="hot"
-                  label="Hot Market"
-                  adjustment="+4%"
-                  color="orange"
-                  selected={selectedScenario === 'hot'}
-                  onClick={() => setSelectedScenario('hot')}
-                />
-                <ScenarioButton
-                  scenario="balanced"
-                  label="Balanced"
-                  adjustment="±0%"
-                  color="blue"
-                  selected={selectedScenario === 'balanced'}
-                  onClick={() => setSelectedScenario('balanced')}
-                />
-                <ScenarioButton
-                  scenario="soft"
-                  label="Soft Market"
-                  adjustment="-8%"
-                  color="teal"
-                  selected={selectedScenario === 'soft'}
-                  onClick={() => setSelectedScenario('soft')}
-                />
-              </div>
-              <p className="text-xs text-muted-foreground text-center mt-3">
-                {selectedScenario === 'balanced' 
-                  ? 'Current market conditions' 
-                  : selectedScenario === 'hot'
-                  ? 'If demand increases this spring'
-                  : 'If inventory rises significantly'}
-              </p>
-            </div>
-          </div>
+          <EquitySnapshot
+            estimatedValue={result.estimatedCurrentValue}
+            mortgageBalance={mortgagePosition?.totalOutstandingDebt ?? null}
+            netEquity={mortgagePosition?.netEquity ?? null}
+            currentEstimatedPayment={currentEstimatedDebtPayment}
+            refinanceRate={refinanceRate}
+            refinancePayment={refinancePayment}
+            refinanceDelta={refinanceDelta}
+          />
         </motion.section>
 
-        {/* Key Metrics */}
-        <motion.div
-          className="grid grid-cols-3 gap-3 mb-8"
+        <motion.section
+          className="mb-8"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.15 }}
+          transition={{ duration: 0.5, delay: 0.2 }}
         >
-          <div className="p-4 rounded-xl bg-surface border border-border text-center">
-            <p className="text-xs text-muted-foreground mb-1">ROI</p>
-            <p className={`text-lg font-bold ${result.roiPercent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {result.roiPercent >= 0 ? '+' : ''}{result.roiPercent}%
-            </p>
-          </div>
-          <div className="p-4 rounded-xl bg-surface border border-border text-center">
-            <div className="flex items-center justify-center gap-1 mb-1">
-              <p className="text-xs text-muted-foreground">Your Growth</p>
-              <InfoTooltip 
-                content="Your growth reflects your specific property's estimated value change based on regional HPI movement. Individual results may vary from market averages based on purchase price timing and property characteristics."
-              />
-            </div>
-            <p className="text-lg font-bold text-foreground">
-              {result.appreciationFactor.toFixed(2)}x
-            </p>
-          </div>
-          <div className="p-4 rounded-xl bg-surface border border-border text-center">
-            <div className="flex items-center justify-center gap-1 mb-1">
-              <p className="text-xs text-muted-foreground">Market Growth (HPI)</p>
-              <InfoTooltip 
-                content="The Home Price Index tracks average market movement for this area. Your results may differ based on your specific purchase price, property condition, and timing."
-              />
-            </div>
-            <p className={`text-lg font-bold ${result.hpiCurrent >= result.hpiAtPurchase ? 'text-green-400' : 'text-red-400'}`}>
-              {result.hpiCurrent >= result.hpiAtPurchase ? '+' : ''}
-              {((result.hpiCurrent / result.hpiAtPurchase - 1) * 100).toFixed(0)}%
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {result.hpiAtPurchase.toFixed(1)} → {result.hpiCurrent.toFixed(1)}
-            </p>
-          </div>
-        </motion.div>
-
-        {/* HPI Trend Chart */}
-        {result.hpiTrend && result.hpiTrend.length > 0 && (
-          <HPITrendChart
-            data={result.hpiTrend}
-            purchaseDate={`${result.input.purchaseYear}-${result.input.purchaseMonth.toString().padStart(2, '0')}`}
-            purchaseHPI={result.hpiAtPurchase}
-            currentHPI={result.hpiCurrent}
-            className="mb-8"
+          <CalculationDetailsDisclosure
+            purchasePrice={result.input.purchasePrice}
+            monthsElapsed={mortgagePosition?.summary.monthsElapsed ?? null}
+            values={
+              editableAssumptions ?? {
+                interestRate: 0,
+                amortization: 25,
+                downPayment: 0,
+                secondaryMortgageBalance: 0,
+                helocBalance: 0,
+              }
+            }
+            originalValues={
+              originalAssumptions ?? {
+                interestRate: 0,
+                amortization: 25,
+                downPayment: 0,
+                secondaryMortgageBalance: 0,
+                helocBalance: 0,
+              }
+            }
+            summary={{
+              originalMortgage: mortgagePosition?.summary.originalMortgage ?? null,
+              primaryRemainingBalance: mortgagePosition?.summary.remainingBalance ?? null,
+              totalOutstandingDebt: mortgagePosition?.totalOutstandingDebt ?? null,
+              principalPaid: mortgagePosition?.summary.principalPaidToDate ?? null,
+              interestPaid: mortgagePosition?.summary.interestPaidToDate ?? null,
+              monthlyPayment: mortgagePosition?.summary.monthlyPayment ?? null,
+            }}
+            onChange={(values) => setEditableAssumptions(values)}
+            onReset={() => {
+              if (originalAssumptions) {
+                setEditableAssumptions(originalAssumptions);
+              }
+            }}
           />
-        )}
+        </motion.section>
 
-        {/* Equity Unlock Form */}
-        <EquityUnlockForm
-          purchasePrice={result.input.purchasePrice}
-          purchaseYear={result.input.purchaseYear}
-          purchaseMonth={result.input.purchaseMonth}
-          estimatedCurrentValue={currentScenario.value}
-          estimateId={estimateId}
-          region={result.input.region}
-          propertyType={result.input.propertyType}
-          className="mb-8"
-        />
+        <motion.section
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.25 }}
+        >
+          <FreeEvalCTA />
+        </motion.section>
 
+        <footer className="mt-6 flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-border/70 bg-surface/50 px-4 py-3 text-center text-xs text-muted-foreground">
+          <ShieldCheck className="h-3.5 w-3.5 text-accent-cyan" />
+          <span>Data source: TRREB benchmark &amp; market stats.</span>
+          {marketStats?.reportMonth ? <span>Latest market pulse month: {formatPeriodLabel(marketStats.reportMonth)}.</span> : null}
+        </footer>
       </div>
-
-      {/* Methodology Modal */}
-      <MethodologyModal
-        isOpen={showMethodology}
-        onClose={() => setShowMethodology(false)}
-        hpiAtPurchase={result.hpiAtPurchase}
-        hpiCurrent={result.hpiCurrent}
-        appreciationFactor={result.appreciationFactor}
-      />
     </main>
-  );
-}
-
-// Scenario Toggle Button Component
-function ScenarioButton({
-  scenario,
-  label,
-  adjustment,
-  color,
-  selected,
-  onClick,
-}: {
-  scenario: string;
-  label: string;
-  adjustment: string;
-  color: 'orange' | 'blue' | 'teal';
-  selected: boolean;
-  onClick: () => void;
-}) {
-  const colorClasses = {
-    orange: selected 
-      ? 'bg-orange-500/20 border-orange-500/50 text-orange-400' 
-      : 'bg-transparent border-border hover:border-orange-500/30 text-muted-foreground',
-    blue: selected 
-      ? 'bg-accent-blue/20 border-accent-blue/50 text-accent-cyan' 
-      : 'bg-transparent border-border hover:border-accent-blue/30 text-muted-foreground',
-    teal: selected 
-      ? 'bg-teal-500/20 border-teal-500/50 text-teal-400' 
-      : 'bg-transparent border-border hover:border-teal-500/30 text-muted-foreground',
-  };
-
-  return (
-    <button
-      onClick={onClick}
-      className={`px-4 py-2 rounded-lg border text-sm font-medium transition-all ${colorClasses[color]}`}
-    >
-      <span className="block">{label}</span>
-      <span className="block text-xs opacity-70">{adjustment}</span>
-    </button>
   );
 }

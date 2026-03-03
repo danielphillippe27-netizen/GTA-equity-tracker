@@ -36,6 +36,44 @@ export async function GET(request: Request) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     
     if (!error) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user?.email) {
+        const normalizedEmail = user.email.toLowerCase().trim();
+        const { data: subscriber } = await supabase
+          .from('subscribers')
+          .select('name, property_data, estimate_id')
+          .eq('email', normalizedEmail)
+          .maybeSingle();
+
+        const propertyData =
+          (subscriber?.property_data as Record<string, unknown> | null) ??
+          ((user.user_metadata?.propertyData as Record<string, unknown> | undefined) ?? {});
+        const profileName =
+          subscriber?.name ||
+          (typeof user.user_metadata?.name === 'string' ? user.user_metadata.name : '') ||
+          (typeof user.user_metadata?.full_name === 'string'
+            ? user.user_metadata.full_name
+            : '');
+
+        await supabase.from('profiles').upsert(
+          {
+            id: user.id,
+            email: normalizedEmail,
+            name: profileName,
+            property_data: propertyData,
+            primary_estimate_id:
+              (subscriber?.estimate_id as string | null | undefined) ??
+              (typeof propertyData.estimateId === 'string'
+                ? propertyData.estimateId
+                : null),
+          },
+          { onConflict: 'id' }
+        );
+      }
+
       return NextResponse.redirect(`${origin}${next}`);
     }
   }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase/server';
+import { sendCmaRequestNotification } from '@/lib/email/resend';
 import { v4 as uuidv4 } from 'uuid';
 
 // Email validation regex
@@ -40,8 +41,8 @@ export async function POST(request: NextRequest) {
     // Store in database if Supabase is configured
     if (isSupabaseServerConfigured()) {
       const supabase = createServerClient();
-      
-      const { error } = await supabase.from('cma_requests').insert({
+
+      const insertPayload = {
         id: requestId,
         estimate_id: estimateId || null,
         session_id: sessionId || null,
@@ -51,7 +52,23 @@ export async function POST(request: NextRequest) {
         preferred_contact_method: preferredContactMethod || 'email',
         notes: notes?.trim() || null,
         status: 'pending',
-      });
+      };
+
+      let { error } = await supabase.from('cma_requests').insert(insertPayload);
+
+      if (error?.code === '23503' && estimateId) {
+        console.warn(
+          'CMA request estimate_id is not present in legacy estimates table, retrying without foreign key:',
+          estimateId
+        );
+
+        const retryResult = await supabase.from('cma_requests').insert({
+          ...insertPayload,
+          estimate_id: null,
+        });
+
+        error = retryResult.error;
+      }
 
       if (error) {
         console.error('Failed to store CMA request:', error);
@@ -69,6 +86,19 @@ export async function POST(request: NextRequest) {
         phone,
         estimateId,
       });
+    }
+
+    const notificationResult = await sendCmaRequestNotification({
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      phone: phone?.trim() || null,
+      estimateId: estimateId || null,
+      preferredContactMethod: preferredContactMethod || 'email',
+      notes: notes?.trim() || null,
+    });
+
+    if (!notificationResult.success) {
+      console.warn('CMA request notification not sent:', notificationResult.error);
     }
 
     return NextResponse.json({

@@ -26,6 +26,7 @@ import {
   getHPITrend,
   getBenchmarkPrice,
   getCurrentBenchmarkPrice,
+  getCurrentMarketStats,
 } from '@/lib/estimation/hpi';
 
 // Extended result type with data era information
@@ -120,9 +121,10 @@ export async function calculateEquityBridge(
     console.log('[Bridge Calculator] HPI calculation successful');
     
     // Fetch regional benchmark prices in parallel
-    const [benchmarkAtPurchaseResult, benchmarkCurrentResult] = await Promise.all([
+    const [benchmarkAtPurchaseResult, benchmarkCurrentResult, currentMarketStats] = await Promise.all([
       getBenchmarkPrice(region, propertyType, purchaseYear, purchaseMonth),
       getCurrentBenchmarkPrice(region, propertyType),
+      getCurrentMarketStats(region, propertyType),
     ]);
     
     console.log('[Bridge Calculator] Benchmark prices:', {
@@ -140,6 +142,7 @@ export async function calculateEquityBridge(
       benchmarkAtPurchaseDate: benchmarkAtPurchaseResult?.date ?? null,
       benchmarkCurrent: benchmarkCurrentResult?.price ?? null,
       benchmarkCurrentDate: benchmarkCurrentResult?.date ?? null,
+      currentMarketStats: currentMarketStats ?? undefined,
     };
   }
   
@@ -179,10 +182,11 @@ async function calculateHistoricEquity(
   const hpiTrend = generateHistoricTrend(purchaseYear, LATEST_YEAR);
   
   // Fetch regional benchmark prices in parallel with HPI trend
-  const [benchmarkAtPurchaseResult, benchmarkCurrentResult, hpiTrendRecent] = await Promise.all([
+  const [benchmarkAtPurchaseResult, benchmarkCurrentResult, hpiTrendRecent, currentMarketStats] = await Promise.all([
     getBenchmarkPrice(region, propertyType, purchaseYear, purchaseMonth),
     getCurrentBenchmarkPrice(region, propertyType),
     getHPITrend(region, propertyType, HPI_START_YEAR, 1).catch(() => []),
+    getCurrentMarketStats(region, propertyType),
   ]);
   
   console.log('[Historic Equity] Benchmark prices:', {
@@ -254,6 +258,7 @@ async function calculateHistoricEquity(
     benchmarkAtPurchaseDate: benchmarkAtPurchaseResult?.date ?? null,
     benchmarkCurrent: benchmarkCurrentResult?.price ?? null,
     benchmarkCurrentDate: benchmarkCurrentResult?.date ?? null,
+    currentMarketStats: currentMarketStats ?? undefined,
   };
 }
 

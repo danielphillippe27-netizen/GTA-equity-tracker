@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, isSupabaseServerConfigured } from '@/lib/supabase/server';
-import { validateHPIInput, HPIEstimateInput, getBenchmarkPrice, getCurrentBenchmarkPrice } from '@/lib/estimation/hpi';
+import {
+  validateHPIInput,
+  HPIEstimateInput,
+  type CurrentMarketStats,
+  type HPIDataPoint,
+} from '@/lib/estimation/hpi';
 import { calculateEquityBridge, getDataEraLabel } from '@/lib/calculation/bridge-calculator';
 import { getDataEra, HPI_START_YEAR } from '@/src/data/historic-averages';
 import { v4 as uuidv4 } from 'uuid';
@@ -192,14 +197,36 @@ export async function GET(request: NextRequest) {
       },
     };
 
-    // Fetch regional benchmark prices in parallel
-    const [benchmarkAtPurchaseResult, benchmarkCurrentResult] = await Promise.all([
-      getBenchmarkPrice(region, propertyType, data.purchase_year, data.purchase_month),
-      getCurrentBenchmarkPrice(region, propertyType),
-    ]);
+    const liveBridgeResult = await calculateEquityBridge({
+      region,
+      propertyType,
+      purchaseYear: data.purchase_year,
+      purchaseMonth: data.purchase_month,
+      purchasePrice: data.purchase_price,
+    });
 
     // Transform database record back to result format
-    const result = {
+    const result: {
+      input: HPIEstimateInput;
+      hpiAtPurchase: number;
+      hpiCurrent: number;
+      hpiCurrentDate: string;
+      appreciationFactor: number;
+      estimatedCurrentValue: number;
+      equityGained: number;
+      roiPercent: number;
+      hpiTrend: HPIDataPoint[];
+      calculatedAt: string;
+      scenarios: typeof scenarios;
+      dataEra: ReturnType<typeof getDataEra>;
+      dataSource: string;
+      bridgeNote: string | undefined;
+      benchmarkAtPurchase: number | null;
+      benchmarkAtPurchaseDate: string | null;
+      benchmarkCurrent: number | null;
+      benchmarkCurrentDate: string | null;
+      currentMarketStats: CurrentMarketStats | undefined;
+    } = {
       input: {
         region,
         propertyType,
@@ -224,11 +251,26 @@ export async function GET(request: NextRequest) {
         ? `Using synthetic index based on TRREB average price trends for years prior to ${HPI_START_YEAR}.`
         : undefined,
       // Regional benchmark prices
-      benchmarkAtPurchase: benchmarkAtPurchaseResult?.price ?? null,
-      benchmarkAtPurchaseDate: benchmarkAtPurchaseResult?.date ?? null,
-      benchmarkCurrent: benchmarkCurrentResult?.price ?? null,
-      benchmarkCurrentDate: benchmarkCurrentResult?.date ?? null,
+      benchmarkAtPurchase: null,
+      benchmarkAtPurchaseDate: null,
+      benchmarkCurrent: null,
+      benchmarkCurrentDate: null,
+      currentMarketStats: undefined,
     };
+
+    if (!('error' in liveBridgeResult)) {
+      result.hpiAtPurchase = liveBridgeResult.hpiAtPurchase;
+      result.hpiCurrent = liveBridgeResult.hpiCurrent;
+      result.hpiCurrentDate = liveBridgeResult.hpiCurrentDate;
+      result.hpiTrend = liveBridgeResult.hpiTrend;
+      result.benchmarkAtPurchase = liveBridgeResult.benchmarkAtPurchase;
+      result.benchmarkAtPurchaseDate = liveBridgeResult.benchmarkAtPurchaseDate;
+      result.benchmarkCurrent = liveBridgeResult.benchmarkCurrent;
+      result.benchmarkCurrentDate = liveBridgeResult.benchmarkCurrentDate;
+      result.currentMarketStats = liveBridgeResult.currentMarketStats;
+      result.dataSource = liveBridgeResult.dataSource;
+      result.bridgeNote = liveBridgeResult.bridgeNote;
+    }
 
     return NextResponse.json({ estimateId, result });
   } catch (error) {

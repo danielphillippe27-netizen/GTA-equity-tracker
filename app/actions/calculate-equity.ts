@@ -2,7 +2,10 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { HISTORIC_ANNUAL_AVERAGES, ANCHOR_PRICE_2012 } from '@/lib/historic-averages';
-import { getLookupKeys } from '@/lib/district-mapping';
+import {
+  getAreaIdForMarketData,
+  getPropertyTypeIdForMarketData,
+} from '@/lib/trreb-taxonomy';
 
 // Initialize Supabase Client (Service Role needed for RLS if not authenticated, but Anon is fine for reading public data)
 // Using process.env directly since this is server-side
@@ -27,11 +30,13 @@ export async function calculateEquity(
   try {
     const purchaseYear = purchaseDate.getFullYear();
     const purchaseMonth = purchaseDate.getMonth() + 1;
-    const formattedPurchaseMonth = `${purchaseYear}-${purchaseMonth.toString().padStart(2, '0')}`;
-    
-    // Normalize Area Name (Handle "Pickering" vs "E13")
-    // We use the lookup keys to find ANY match in the DB
-    const lookupAreas = getLookupKeys(areaName);
+    const formattedPurchaseMonth = `${purchaseYear}-${purchaseMonth.toString().padStart(2, '0')}-01`;
+    const areaId = getAreaIdForMarketData(areaName);
+    const propertyTypeId = getPropertyTypeIdForMarketData(propertyType);
+
+    if (!areaId || !propertyTypeId) {
+      return { error: `Unsupported HPI lookup for ${areaName} / ${propertyType}` };
+    }
 
     // --- SCENARIO A: Modern Era (2012+) ---
     if (purchaseYear >= 2012) {
@@ -39,9 +44,9 @@ export async function calculateEquity(
       const { data: purchaseData, error: pError } = await supabase
         .from('market_hpi')
         .select('hpi_index')
-        .in('area_name', lookupAreas)
-        .eq('property_category', propertyType)
-        .eq('report_month', formattedPurchaseMonth)
+        .eq('area_id', areaId)
+        .eq('property_type_id', propertyTypeId)
+        .eq('period', formattedPurchaseMonth)
         .maybeSingle(); // Use maybeSingle to avoid 406 error if multiple rows match (shouldn't due to unique constraint, but safe)
 
       if (pError || !purchaseData) {
@@ -55,10 +60,10 @@ export async function calculateEquity(
       // 2. Get Current HPI (Most Recent)
       const { data: currentData, error: cError } = await supabase
         .from('market_hpi')
-        .select('hpi_index, report_month')
-        .in('area_name', lookupAreas)
-        .eq('property_category', propertyType)
-        .order('report_month', { ascending: false })
+        .select('hpi_index, period')
+        .eq('area_id', areaId)
+        .eq('property_type_id', propertyTypeId)
+        .order('period', { ascending: false })
         .limit(1)
         .single();
 
@@ -97,18 +102,18 @@ export async function calculateEquity(
       const { data: hpi2012Data, error: h2012Error } = await supabase
         .from('market_hpi')
         .select('hpi_index')
-        .in('area_name', lookupAreas)
-        .eq('property_category', propertyType)
-        .eq('report_month', '2012-01') // Anchor point
+        .eq('area_id', areaId)
+        .eq('property_type_id', propertyTypeId)
+        .eq('period', '2012-01-01') // Anchor point
         .maybeSingle();
 
       // Get Current HPI
       const { data: currentData, error: cError } = await supabase
         .from('market_hpi')
         .select('hpi_index')
-        .in('area_name', lookupAreas)
-        .eq('property_category', propertyType)
-        .order('report_month', { ascending: false })
+        .eq('area_id', areaId)
+        .eq('property_type_id', propertyTypeId)
+        .order('period', { ascending: false })
         .limit(1)
         .single();
 

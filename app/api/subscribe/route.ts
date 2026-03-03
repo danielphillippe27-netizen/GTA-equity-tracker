@@ -2,6 +2,51 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { sendWelcomeEmail } from '@/lib/email/resend';
 
+async function unsubscribeSubscriber(id?: string | null, email?: string | null) {
+  if (!email && !id) {
+    return {
+      success: false,
+      status: 400,
+      payload: { error: 'Email or subscriber ID required' },
+    };
+  }
+
+  const supabase = createServerClient();
+  const query = supabase
+    .from('subscribers')
+    .update({
+      unsubscribed_at: new Date().toISOString(),
+      monthly_reports: false,
+      market_alerts: false,
+    });
+
+  if (id) {
+    query.eq('id', id);
+  } else if (email) {
+    query.eq('email', email.toLowerCase().trim());
+  }
+
+  const { error } = await query;
+
+  if (error) {
+    console.error('Error unsubscribing:', error);
+    return {
+      success: false,
+      status: 500,
+      payload: { error: 'Failed to unsubscribe' },
+    };
+  }
+
+  return {
+    success: true,
+    status: 200,
+    payload: {
+      success: true,
+      message: 'You have been unsubscribed from monthly market updates.',
+    },
+  };
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -88,6 +133,7 @@ export async function POST(request: NextRequest) {
         equityGained: propertyData.netEquity || 0,
         region: propertyData.region || 'GTA',
         propertyType: propertyData.propertyType || 'Property',
+        subscriberId: subscriber.id,
       }).catch((err) => {
         console.error('Welcome email failed (non-blocking):', err);
       });
@@ -108,50 +154,62 @@ export async function POST(request: NextRequest) {
   }
 }
 
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const email = searchParams.get('email');
+    const id = searchParams.get('id');
+    const result = await unsubscribeSubscriber(id, email);
+
+    if (!result.success) {
+      return new NextResponse(
+        `
+<!DOCTYPE html>
+<html>
+  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0B0F14; color: #ffffff; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px;">
+    <div style="max-width: 480px; text-align: center;">
+      <h1 style="margin-bottom: 12px;">Unable to unsubscribe</h1>
+      <p style="color: #94a3b8;">${result.payload.error}</p>
+    </div>
+  </body>
+</html>`,
+        {
+          status: result.status,
+          headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        }
+      );
+    }
+
+    return new NextResponse(
+      `
+<!DOCTYPE html>
+<html>
+  <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0B0F14; color: #ffffff; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px;">
+    <div style="max-width: 480px; text-align: center;">
+      <h1 style="margin-bottom: 12px;">You have been unsubscribed</h1>
+      <p style="color: #94a3b8;">You will no longer receive monthly GTA market updates.</p>
+    </div>
+  </body>
+</html>`,
+      {
+        status: 200,
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      }
+    );
+  } catch (error) {
+    console.error('Unsubscribe GET error:', error);
+    return new NextResponse('Failed to unsubscribe', { status: 500 });
+  }
+}
+
 // Unsubscribe endpoint
 export async function DELETE(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const email = searchParams.get('email');
     const id = searchParams.get('id');
-
-    if (!email && !id) {
-      return NextResponse.json(
-        { error: 'Email or subscriber ID required' },
-        { status: 400 }
-      );
-    }
-
-    const supabase = createServerClient();
-
-    const query = supabase
-      .from('subscribers')
-      .update({ 
-        unsubscribed_at: new Date().toISOString(),
-        monthly_reports: false,
-        market_alerts: false,
-      });
-
-    if (id) {
-      query.eq('id', id);
-    } else if (email) {
-      query.eq('email', email.toLowerCase().trim());
-    }
-
-    const { error } = await query;
-
-    if (error) {
-      console.error('Error unsubscribing:', error);
-      return NextResponse.json(
-        { error: 'Failed to unsubscribe' },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      message: 'You\'ve been unsubscribed. Sorry to see you go!',
-    });
+    const result = await unsubscribeSubscriber(id, email);
+    return NextResponse.json(result.payload, { status: result.status });
 
   } catch (error) {
     console.error('Unsubscribe error:', error);
