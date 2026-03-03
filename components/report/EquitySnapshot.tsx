@@ -112,19 +112,13 @@ export function EquitySnapshot({
         </div>
       )}
 
-      <details className="mt-8 rounded-2xl border border-border bg-background/20 p-5 group">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-4">
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">Financial details</h3>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Expand to view payment, refinance, and borrowing context.
-            </p>
-          </div>
-          <span className="text-xs uppercase tracking-[0.18em] text-muted-foreground transition-transform group-open:rotate-180">
-            v
-          </span>
-        </summary>
-
+      <div className="mt-8 rounded-2xl border border-border bg-background/20 p-5">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Financial details</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Payment, refinance, and borrowing context.
+          </p>
+        </div>
         <div className="mt-4 space-y-4 text-sm text-muted-foreground">
           <div className="flex flex-col gap-1 border-b border-border/70 pb-4 sm:flex-row sm:items-center sm:justify-between">
             <span className="text-foreground">Estimated current payment</span>
@@ -162,7 +156,7 @@ export function EquitySnapshot({
           </div>
           <p className="text-xs text-muted-foreground">(Subject to lender approval)</p>
         </div>
-      </details>
+      </div>
     </section>
   );
 }

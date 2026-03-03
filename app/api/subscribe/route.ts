@@ -2,6 +2,34 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { sendWelcomeEmail } from '@/lib/email/resend';
 
+async function sendWelcomeEmailIfPossible({
+  email,
+  name,
+  propertyData,
+  subscriberId,
+}: {
+  email: string;
+  name?: string | null;
+  propertyData?: Record<string, unknown> | null;
+  subscriberId: string;
+}) {
+  if (!propertyData) {
+    return;
+  }
+
+  sendWelcomeEmail({
+    to: email.toLowerCase().trim(),
+    name: name || 'Homeowner',
+    estimatedValue: Number(propertyData.estimatedCurrentValue) || 0,
+    equityGained: Number(propertyData.netEquity) || 0,
+    region: String(propertyData.region || 'GTA'),
+    propertyType: String(propertyData.propertyType || 'Property'),
+    subscriberId,
+  }).catch((err) => {
+    console.error('Welcome email failed (non-blocking):', err);
+  });
+}
+
 async function unsubscribeSubscriber(id?: string | null, email?: string | null) {
   if (!email && !id) {
     return {
@@ -78,6 +106,7 @@ export async function POST(request: NextRequest) {
             monthly_reports: true,
             property_data: propertyData || {},
             estimate_id: estimateId,
+            name: name || null,
           })
           .eq('id', existing.id);
 
@@ -89,6 +118,13 @@ export async function POST(request: NextRequest) {
           );
         }
 
+        await sendWelcomeEmailIfPossible({
+          email,
+          name,
+          propertyData,
+          subscriberId: existing.id,
+        });
+
         return NextResponse.json({
           success: true,
           message: 'Welcome back! Your subscription has been reactivated.',
@@ -96,10 +132,33 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      // Already subscribed
+      const { error: refreshError } = await supabase
+        .from('subscribers')
+        .update({
+          name: name || null,
+          property_data: propertyData || {},
+          estimate_id: estimateId,
+        })
+        .eq('id', existing.id);
+
+      if (refreshError) {
+        console.error('Error refreshing subscriber:', refreshError);
+        return NextResponse.json(
+          { error: 'Failed to refresh subscription details' },
+          { status: 500 }
+        );
+      }
+
+      await sendWelcomeEmailIfPossible({
+        email,
+        name,
+        propertyData,
+        subscriberId: existing.id,
+      });
+
       return NextResponse.json({
         success: true,
-        message: 'You\'re already subscribed!',
+        message: 'You\'re already subscribed. We refreshed your details and sent your latest welcome email.',
         subscriberId: existing.id,
       });
     }
@@ -124,20 +183,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Send welcome email (don't block on failure)
-    if (propertyData) {
-      sendWelcomeEmail({
-        to: email.toLowerCase().trim(),
-        name: name || 'Homeowner',
-        estimatedValue: propertyData.estimatedCurrentValue || 0,
-        equityGained: propertyData.netEquity || 0,
-        region: propertyData.region || 'GTA',
-        propertyType: propertyData.propertyType || 'Property',
-        subscriberId: subscriber.id,
-      }).catch((err) => {
-        console.error('Welcome email failed (non-blocking):', err);
-      });
-    }
+    await sendWelcomeEmailIfPossible({
+      email,
+      name,
+      propertyData,
+      subscriberId: subscriber.id,
+    });
 
     return NextResponse.json({
       success: true,

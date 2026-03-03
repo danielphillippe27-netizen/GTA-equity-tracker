@@ -75,7 +75,7 @@ export function CalculationDetailsDisclosure({
   onReset,
 }: CalculationDetailsDisclosureProps) {
   return (
-    <details className="group rounded-[28px] border border-border bg-surface/85 p-6" open>
+    <details className="group rounded-[28px] border border-border bg-surface/85 p-6">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
         <div>
           <p className="text-sm text-muted-foreground">Details</p>

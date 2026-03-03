@@ -42,9 +42,6 @@ export function FreeEvalCTA({ estimateId, className }: FreeEvalCTAProps) {
               <p className="text-lg font-medium text-foreground">
                 The Phillippe Group
               </p>
-              <p className="text-lg text-muted-foreground">
-                Combined 6 years of experience selling real estate.
-              </p>
             </div>
             <GlowButton
               onClick={() => router.push(targetHref)}
