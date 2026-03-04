@@ -349,11 +349,11 @@ export function HeroSection({
               />
             ) : null}
             <div>
-              <p className="text-xs uppercase tracking-[0.24em] text-cyan-300/80">
-                {workspaceSlug ? `/${workspaceSlug}` : 'Workspace'}
+              <p className="text-xs font-medium uppercase tracking-[0.24em] text-white">
+                Brought to you by:
               </p>
-              <p className="mt-1 text-sm font-medium text-slate-200">
-                {workspaceName}
+              <p className="mt-2 text-lg font-medium text-cyan-300">
+                The Phillippe Group
               </p>
             </div>
           </div>

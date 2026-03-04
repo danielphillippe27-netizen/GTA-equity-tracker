@@ -1,15 +1,26 @@
 import { Resend } from 'resend';
 import { createServerClient } from '@/lib/supabase/server';
 
-const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
-const RESEND_FALLBACK_FROM_EMAIL = 'onboarding@resend.dev';
-
-function getResendClient() {
-  if (!process.env.RESEND_API_KEY) {
+function readEnv(name: string): string | null {
+  const value = process.env[name];
+  if (!value) {
     return null;
   }
 
-  return new Resend(process.env.RESEND_API_KEY);
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+const FROM_EMAIL = readEnv('RESEND_FROM_EMAIL') || 'onboarding@resend.dev';
+const RESEND_FALLBACK_FROM_EMAIL = 'onboarding@resend.dev';
+
+function getResendClient() {
+  const apiKey = readEnv('RESEND_API_KEY');
+  if (!apiKey) {
+    return null;
+  }
+
+  return new Resend(apiKey);
 }
 
 function shouldRetryWithFallbackSender(error: unknown): boolean {
@@ -48,10 +59,10 @@ async function sendWithSenderFallback(
 
 function getAppBaseUrl(): string {
   const configuredBaseUrl =
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.APP_URL ||
-    process.env.NEXT_PUBLIC_SITE_URL ||
-    process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    readEnv('NEXT_PUBLIC_APP_URL') ||
+    readEnv('APP_URL') ||
+    readEnv('NEXT_PUBLIC_SITE_URL') ||
+    readEnv('VERCEL_PROJECT_PRODUCTION_URL');
 
   if (configuredBaseUrl) {
     return configuredBaseUrl.startsWith('http')
@@ -59,8 +70,9 @@ function getAppBaseUrl(): string {
       : `https://${configuredBaseUrl}`;
   }
 
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL}`;
+  const vercelUrl = readEnv('VERCEL_URL');
+  if (vercelUrl) {
+    return `https://${vercelUrl}`;
   }
 
   return 'http://localhost:3000';
@@ -85,8 +97,8 @@ function buildPreciseEvaluationUrl(
   estimateId?: string | null
 ): string {
   const recipient =
-    process.env.CMA_REQUEST_NOTIFY_EMAIL ||
-    process.env.RESEND_FROM_EMAIL ||
+    readEnv('CMA_REQUEST_NOTIFY_EMAIL') ||
+    readEnv('RESEND_FROM_EMAIL') ||
     'info@equitytracker.ca';
   const subject = `Precise home evaluation request from ${titleCaseName(name)}`;
   const lines = [
@@ -108,8 +120,8 @@ function buildPreciseEvaluationUrl(
 
 function getCmaRequestNotificationRecipient(): string | null {
   return (
-    process.env.CMA_REQUEST_NOTIFY_EMAIL ||
-    process.env.RESEND_FROM_EMAIL ||
+    readEnv('CMA_REQUEST_NOTIFY_EMAIL') ||
+    readEnv('RESEND_FROM_EMAIL') ||
     null
   );
 }

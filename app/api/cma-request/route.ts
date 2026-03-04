@@ -116,8 +116,11 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      notificationSent: notificationResult.success,
       requestId,
-      message: 'Your request has been submitted. We will be in touch soon.',
+      message: notificationResult.success
+        ? 'Your request has been submitted. We will be in touch soon.'
+        : 'Your request was saved, but the team notification email could not be delivered.',
     });
   } catch (error) {
     console.error('CMA request error:', error);

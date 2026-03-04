@@ -30,6 +30,7 @@ export function RequestPreciseEvaluationForm({
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [notificationSent, setNotificationSent] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -67,6 +68,8 @@ export function RequestPreciseEvaluationForm({
         throw new Error(data.error || 'Failed to submit request');
       }
 
+      const data = (await response.json()) as { notificationSent?: boolean };
+      setNotificationSent(data.notificationSent !== false);
       setIsSuccess(true);
     } catch (submitError) {
       setError(
@@ -86,13 +89,25 @@ export function RequestPreciseEvaluationForm({
           Request Received
         </p>
         <h2 className="mb-3 text-3xl font-semibold text-foreground">
-          Daniel will reach out personally
+          {notificationSent
+            ? 'Daniel will reach out personally'
+            : 'Request received, but team email needs attention'}
         </h2>
         <p className="text-base leading-7 text-muted-foreground">
-          We&apos;ve logged your precise home evaluation request and sent it to
-          The Phillippe Group. Expect a follow-up at{' '}
-          <span className="font-medium text-foreground">{formData.email}</span>
-          {formData.phone ? ` or ${formData.phone}` : ''}.
+          {notificationSent ? (
+            <>
+              We&apos;ve logged your precise home evaluation request and sent it
+              to The Phillippe Group. Expect a follow-up at{' '}
+              <span className="font-medium text-foreground">{formData.email}</span>
+              {formData.phone ? ` or ${formData.phone}` : ''}.
+            </>
+          ) : (
+            <>
+              We&apos;ve logged your request, but the team notification email did
+              not go out. Please use the Contact The Team Directly button above
+              while we fix delivery.
+            </>
+          )}
         </p>
       </div>
     );
