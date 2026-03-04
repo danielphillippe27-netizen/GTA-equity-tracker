@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { User, Session, AuthError } from '@supabase/supabase-js';
+import { User, Session, AuthError, type Provider } from '@supabase/supabase-js';
 import {
   supabase,
 } from '@/lib/supabase/client';
@@ -10,18 +10,55 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
-  signInWithMagicLink: (
+  signInWithEmailPassword: (
+    email: string,
+    password: string,
+    options?: {
+      accountType?: 'homeowner' | 'agent' | 'owner';
+      createAccount?: boolean;
+    }
+  ) => Promise<{ error: AuthError | Error | null }>;
+  signInWithOAuth: (
+    provider: Extract<Provider, 'google' | 'apple'>,
+    options?: {
+      accountType?: 'homeowner' | 'agent' | 'owner';
+      next?: string;
+    }
+  ) => Promise<{ error: AuthError | Error | null }>;
+  sendPasswordReset: (
     email: string,
     options?: {
-      name?: string;
-      propertyData?: Record<string, unknown>;
-      redirectTo?: string;
+      accountType?: 'homeowner' | 'agent' | 'owner';
     }
   ) => Promise<{ error: AuthError | Error | null }>;
   signOut: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+function getAuthRedirectBaseUrl() {
+  const currentOrigin =
+    typeof window === 'undefined' ? null : window.location.origin;
+  const currentHostname =
+    typeof window === 'undefined' ? null : window.location.hostname;
+
+  if (
+    currentHostname === 'localhost' ||
+    currentHostname === '127.0.0.1' ||
+    currentHostname === '0.0.0.0'
+  ) {
+    return currentOrigin || 'http://localhost:3000';
+  }
+
+  const configuredBaseUrl = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (configuredBaseUrl) {
+    return configuredBaseUrl.startsWith('http')
+      ? configuredBaseUrl
+      : `https://${configuredBaseUrl}`;
+  }
+
+  return currentOrigin || 'http://localhost:3000';
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -48,42 +85,99 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signInWithMagicLink = useCallback(
+  const signInWithEmailPassword = useCallback(
     async (
       email: string,
+      password: string,
       options?: {
-        name?: string;
-        propertyData?: Record<string, unknown>;
-        redirectTo?: string;
+        accountType?: 'homeowner' | 'agent' | 'owner';
+        createAccount?: boolean;
       }
     ) => {
-      const redirectTo =
-        options?.redirectTo ||
-        `${window.location.origin}/auth/callback?next=/dashboard`;
-
       try {
-        const response = await fetch('/api/auth/magic-link', {
+        const accountType = options?.accountType || 'homeowner';
+        const createAccount = options?.createAccount === true;
+
+        let authResult = createAccount
+          ? await supabase.auth.signUp({
+              email,
+              password,
+              options: {
+                data: {
+                  accountType,
+                },
+              },
+            })
+          : await supabase.auth.signInWithPassword({
+              email,
+              password,
+            });
+
+        if (
+          !createAccount &&
+          authResult.error?.message === 'Invalid login credentials'
+        ) {
+          const signUpResult = await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              data: {
+                accountType,
+              },
+            },
+          });
+
+          if (!signUpResult.error) {
+            authResult = signUpResult;
+          } else if (signUpResult.error.message !== 'User already registered') {
+            return { error: signUpResult.error };
+          }
+        }
+
+        if (authResult.error) {
+          return { error: authResult.error };
+        }
+
+        const activeUser = authResult.data.user;
+        const activeSession = authResult.data.session;
+
+        if (!activeUser) {
+          return {
+            error: new Error(
+              createAccount
+                ? 'Account created. Check your email to confirm your sign-in.'
+                : 'Unable to sign in with email right now.'
+            ),
+          };
+        }
+
+        if (!activeSession && createAccount) {
+          return {
+            error: new Error('Account created. Check your email to confirm your sign-in.'),
+          };
+        }
+
+        if (!activeSession?.access_token) {
+          return {
+            error: new Error('Unable to finish email sign-in right now.'),
+          };
+        }
+
+        const response = await fetch('/api/auth/bootstrap', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            Authorization: `Bearer ${activeSession.access_token}`,
           },
           body: JSON.stringify({
-            email,
-            redirectTo,
-            name: options?.name || '',
-            propertyData: options?.propertyData || {},
+            accountType,
           }),
         });
 
         if (!response.ok) {
-          const data = (await response.json().catch(() => null)) as
-            | { error?: string }
-            | null;
-
+          const data = (await response.json().catch(() => null)) as { error?: string } | null;
           return {
-            error: new Error(
-              data?.error || 'Unable to send your sign-in link right now.'
-            ),
+            error: new Error(data?.error || 'Unable to finish account setup right now.'),
           };
         }
 
@@ -93,9 +187,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           error:
             error instanceof Error
               ? error
-              : new Error('Unable to send your sign-in link right now.'),
+              : new Error('Unable to sign in with email right now.'),
         };
       }
+    },
+    []
+  );
+
+  const signInWithOAuth = useCallback(
+    async (
+      provider: Extract<Provider, 'google' | 'apple'>,
+      options?: {
+        accountType?: 'homeowner' | 'agent' | 'owner';
+        next?: string;
+      }
+    ) => {
+      const intent = options?.accountType || 'homeowner';
+      const next = options?.next || '/dashboard';
+      const redirectBaseUrl = getAuthRedirectBaseUrl();
+      const redirectTo = new URL('/auth/callback', redirectBaseUrl);
+      redirectTo.searchParams.set('next', next);
+      redirectTo.searchParams.set('intent', intent);
+
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: redirectTo.toString(),
+        },
+      });
+
+      return { error };
+    },
+    []
+  );
+
+  const sendPasswordReset = useCallback(
+    async (
+      email: string,
+      options?: {
+        accountType?: 'homeowner' | 'agent' | 'owner';
+      }
+    ) => {
+      const intent = options?.accountType || 'homeowner';
+      const redirectBaseUrl = getAuthRedirectBaseUrl();
+      const redirectTo = new URL('/auth/reset', redirectBaseUrl);
+      redirectTo.searchParams.set('intent', intent);
+
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: redirectTo.toString(),
+      });
+
+      return { error };
     },
     []
   );
@@ -110,7 +252,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         session,
         loading,
-        signInWithMagicLink,
+        signInWithEmailPassword,
+        signInWithOAuth,
+        sendPasswordReset,
         signOut,
       }}
     >

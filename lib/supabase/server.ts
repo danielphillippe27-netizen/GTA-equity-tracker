@@ -4,7 +4,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 // Note: We use a generic client here since the actual schema types are defined
 // in the Database but Supabase CLI would generate more accurate types.
 // For now, we use 'any' to allow flexible table operations.
-export function createServerClient(): SupabaseClient {
+export function createServiceRoleClient(): SupabaseClient {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -26,6 +26,10 @@ export function createServerClient(): SupabaseClient {
       autoRefreshToken: false,
     },
   });
+}
+
+export function createServerClient(): SupabaseClient {
+  return createServiceRoleClient();
 }
 
 // Helper to check if Supabase server is configured

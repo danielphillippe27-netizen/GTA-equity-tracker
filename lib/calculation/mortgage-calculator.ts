@@ -43,6 +43,47 @@ export interface MortgageSummary {
   percentPaidOff: number;
 }
 
+export interface RefinanceDetailsInput {
+  enabled?: boolean;
+  currentBalance?: number;
+  interestRate?: number;
+  amortizationYears?: number;
+  refinanceYear?: number | null;
+}
+
+export interface MortgagePositionInput extends MortgageInput {
+  secondaryMortgageBalance?: number;
+  helocBalance?: number;
+  refinance?: RefinanceDetailsInput;
+}
+
+export interface MortgagePositionSummary {
+  mode: 'original' | 'refinance';
+  originalMortgage: number;
+  remainingBalance: number;
+  primaryRemainingBalance: number;
+  interestRate: number;
+  amortizationYears: number;
+  monthlyPayment: number;
+  monthsElapsed: number;
+  yearsElapsed: number;
+  principalPaidToDate: number | null;
+  interestPaidToDate: number | null;
+  accessedEquitySincePurchase: number | null;
+  refinanceYear: number | null;
+  originalRemainingBalanceAtRefinance: number | null;
+  monthsSinceRefinance: number | null;
+}
+
+export interface MortgagePosition {
+  mode: 'original' | 'refinance';
+  originalSummary: MortgageSummary;
+  summary: MortgagePositionSummary;
+  secondaryMortgageBalance: number;
+  helocBalance: number;
+  totalOutstandingDebt: number;
+}
+
 export interface RefinanceScenario {
   additionalLoanAmount: number;
   interestRate: number;
@@ -170,6 +211,29 @@ export function calculateInterestPaidToDate(
   return totalPaid - principalPaid;
 }
 
+export function calculatePreviousBalanceFromCurrentBalance(
+  currentBalance: number,
+  annualRate: number,
+  remainingAmortizationYears: number
+): number {
+  if (currentBalance <= 0 || remainingAmortizationYears <= 0) {
+    return Math.max(0, currentBalance);
+  }
+
+  const monthlyPayment = calculateMonthlyPayment(
+    currentBalance,
+    annualRate,
+    remainingAmortizationYears
+  );
+
+  if (annualRate <= 0) {
+    return currentBalance + monthlyPayment;
+  }
+
+  const monthlyRate = annualRate / 100 / 12;
+  return Math.max(currentBalance, (currentBalance + monthlyPayment) / (1 + monthlyRate));
+}
+
 /**
  * Calculate months elapsed since purchase
  */
@@ -273,6 +337,109 @@ export function calculateMortgageSummary(input: MortgageInput): MortgageSummary 
     principalPaidToDate,
     interestPaidToDate,
     percentPaidOff,
+  };
+}
+
+export function calculateMortgagePosition(input: MortgagePositionInput): MortgagePosition {
+  const originalSummary = calculateMortgageSummary(input);
+  const secondaryMortgageBalance = Math.max(0, input.secondaryMortgageBalance ?? 0);
+  const helocBalance = Math.max(0, input.helocBalance ?? 0);
+  const refinanceEnabled = input.refinance?.enabled === true;
+
+  if (!refinanceEnabled) {
+    const totalOutstandingDebt =
+      originalSummary.remainingBalance + secondaryMortgageBalance + helocBalance;
+
+    return {
+      mode: 'original',
+      originalSummary,
+      summary: {
+        mode: 'original',
+        originalMortgage: originalSummary.originalMortgage,
+        remainingBalance: originalSummary.remainingBalance,
+        primaryRemainingBalance: originalSummary.remainingBalance,
+        interestRate: originalSummary.interestRate,
+        amortizationYears: originalSummary.amortizationYears,
+        monthlyPayment: originalSummary.monthlyPayment,
+        monthsElapsed: originalSummary.monthsElapsed,
+        yearsElapsed: originalSummary.yearsElapsed,
+        principalPaidToDate: originalSummary.principalPaidToDate,
+        interestPaidToDate: originalSummary.interestPaidToDate,
+        accessedEquitySincePurchase: null,
+        refinanceYear: null,
+        originalRemainingBalanceAtRefinance: null,
+        monthsSinceRefinance: null,
+      },
+      secondaryMortgageBalance,
+      helocBalance,
+      totalOutstandingDebt,
+    };
+  }
+
+  const currentBalance = Math.max(
+    0,
+    input.refinance?.currentBalance ?? originalSummary.remainingBalance
+  );
+  const currentInterestRate = Math.max(
+    0,
+    input.refinance?.interestRate ?? originalSummary.interestRate
+  );
+  const currentAmortizationYears = Math.max(
+    1,
+    input.refinance?.amortizationYears ?? 25
+  );
+  const currentYear = new Date().getFullYear();
+  const refinanceYearRaw = input.refinance?.refinanceYear;
+  const refinanceYear =
+    typeof refinanceYearRaw === 'number' && Number.isFinite(refinanceYearRaw)
+      ? Math.min(currentYear, Math.max(input.purchaseYear, Math.trunc(refinanceYearRaw)))
+      : null;
+  const monthsToRefinance =
+    refinanceYear === null ? null : Math.max(0, (refinanceYear - input.purchaseYear) * 12);
+  const originalRemainingBalanceAtRefinance =
+    monthsToRefinance === null
+      ? null
+      : calculateRemainingBalance(
+          originalSummary.originalMortgage,
+          originalSummary.interestRate,
+          originalSummary.amortizationYears,
+          monthsToRefinance
+        );
+  const accessedEquitySincePurchase =
+    originalRemainingBalanceAtRefinance === null
+      ? null
+      : Math.max(0, currentBalance - originalRemainingBalanceAtRefinance);
+  const monthsSinceRefinance =
+    refinanceYear === null ? null : Math.max(0, (currentYear - refinanceYear) * 12);
+  const totalOutstandingDebt = currentBalance + secondaryMortgageBalance + helocBalance;
+
+  return {
+    mode: 'refinance',
+    originalSummary,
+    summary: {
+      mode: 'refinance',
+      originalMortgage: originalSummary.originalMortgage,
+      remainingBalance: currentBalance,
+      primaryRemainingBalance: currentBalance,
+      interestRate: currentInterestRate,
+      amortizationYears: currentAmortizationYears,
+      monthlyPayment: calculateMonthlyPayment(
+        currentBalance,
+        currentInterestRate,
+        currentAmortizationYears
+      ),
+      monthsElapsed: originalSummary.monthsElapsed,
+      yearsElapsed: originalSummary.yearsElapsed,
+      principalPaidToDate: null,
+      interestPaidToDate: null,
+      accessedEquitySincePurchase,
+      refinanceYear,
+      originalRemainingBalanceAtRefinance,
+      monthsSinceRefinance,
+    },
+    secondaryMortgageBalance,
+    helocBalance,
+    totalOutstandingDebt,
   };
 }
 

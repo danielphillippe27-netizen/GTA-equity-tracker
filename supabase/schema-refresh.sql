@@ -154,7 +154,7 @@ FOR EACH ROW EXECUTE PROCEDURE update_session_activity_tracker();
 -- FUNCTIONS
 -- ============================================================================
 
--- Function to get subscribers due for monthly report
+-- Function to get active subscribers for data-driven monthly reports
 CREATE OR REPLACE FUNCTION get_subscribers_due_for_report()
 RETURNS TABLE (
   id UUID,
@@ -174,10 +174,7 @@ BEGIN
   FROM subscribers s
   WHERE s.monthly_reports = true
     AND s.unsubscribed_at IS NULL
-    AND (
-      s.last_report_sent IS NULL 
-      OR s.last_report_sent < NOW() - INTERVAL '30 days'
-    );
+  ;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

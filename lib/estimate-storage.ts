@@ -18,12 +18,18 @@ export interface EstimatePropertyData {
     downPayment: number;
     secondaryMortgageBalance?: number;
     helocBalance?: number;
+    hasRefinanced?: boolean;
+    currentMortgageBalance?: number;
+    currentInterestRate?: number;
+    currentAmortization?: number;
+    refinanceYear?: number;
   };
 }
 
 export interface PendingEstimateData {
   name: string;
   email: string;
+  workspaceSlug?: string;
   propertyData: EstimatePropertyData;
 }
 

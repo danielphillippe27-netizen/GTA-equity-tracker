@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { formatCurrency } from '@/lib/constants';
+import type { WorkspaceBrand } from '@/lib/workspaces';
 import { getHistoricalRate } from '@/lib/data/historical-rates';
 import {
   calculateMortgageSummary,
@@ -118,7 +119,15 @@ type NeighborhoodOption = {
   parent_display_name: string;
 };
 
-export function HeroSection() {
+export function HeroSection({
+  workspaceSlug,
+  workspaceName,
+  brand,
+}: {
+  workspaceSlug?: string;
+  workspaceName?: string;
+  brand?: WorkspaceBrand | null;
+} = {}) {
   const router = useRouter();
 
   const [region, setRegion] = useState('');
@@ -287,6 +296,7 @@ export function HeroSection() {
     const pendingEstimate = {
       name: name.trim(),
       email: email.trim(),
+      workspaceSlug,
         propertyData: {
           region,
           neighborhood: neighborhood || undefined,
@@ -328,6 +338,27 @@ export function HeroSection() {
       />
 
       <div className="relative z-10 w-full max-w-2xl mx-auto">
+        {workspaceName ? (
+          <div className="mb-6 flex items-center justify-center gap-4 text-center">
+            {brand?.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={brand.logoUrl}
+                alt={workspaceName}
+                className="h-12 w-12 rounded-full border border-slate-700/60 object-cover"
+              />
+            ) : null}
+            <div>
+              <p className="text-xs uppercase tracking-[0.24em] text-cyan-300/80">
+                {workspaceSlug ? `/${workspaceSlug}` : 'Workspace'}
+              </p>
+              <p className="mt-1 text-sm font-medium text-slate-200">
+                {workspaceName}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
         <div className="flex justify-center mb-8">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-slate-800/60 border border-slate-700/50 backdrop-blur-sm shadow-lg shadow-cyan-500/10">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse shadow-lg shadow-cyan-400/50" />
@@ -346,7 +377,8 @@ export function HeroSection() {
         </h1>
 
         <p className="text-lg text-slate-400 text-center max-w-xl mx-auto mb-10">
-          Stop guessing with average stats. Track your specific home&apos;s market performance using official TRREB Index data.
+          {brand?.tagline ||
+            "Stop guessing with average stats. Track your specific home's market performance using official TRREB Index data."}
         </p>
 
         <div className="relative">

@@ -10,6 +10,7 @@ interface EquitySnapshotProps {
   refinanceRate: number;
   refinancePayment: number | null;
   refinanceDelta: number | null;
+  accessedEquitySincePurchase: number | null;
 }
 
 export function EquitySnapshot({
@@ -20,6 +21,7 @@ export function EquitySnapshot({
   refinanceRate,
   refinancePayment,
   refinanceDelta,
+  accessedEquitySincePurchase,
 }: EquitySnapshotProps) {
   const hasCoreValues =
     estimatedValue !== null &&
@@ -72,6 +74,12 @@ export function EquitySnapshot({
           {ltv !== null ? (
             <p className="mt-2 text-sm text-muted-foreground">
               {leverageMessage}
+            </p>
+          ) : null}
+          {accessedEquitySincePurchase !== null && accessedEquitySincePurchase > 0 ? (
+            <p className="mt-2 text-sm text-muted-foreground">
+              Since purchase, about {formatCurrency(accessedEquitySincePurchase)} has been accessed
+              through refinancing.
             </p>
           ) : null}
 

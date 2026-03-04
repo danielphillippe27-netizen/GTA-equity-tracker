@@ -1,6 +1,6 @@
 import { calculateEquityBridge } from '@/lib/calculation/bridge-calculator';
 import {
-  calculateMortgageSummary,
+  calculateMortgagePosition,
   calculateNetEquity,
 } from '@/lib/calculation/mortgage-calculator';
 import { sendMonthlyReport } from '@/lib/email/resend';
@@ -15,6 +15,7 @@ interface SubscriberRecord {
   id: string;
   email: string;
   name: string | null;
+  workspace_id?: string | null;
   property_data: Record<string, unknown> | null;
   estimate_id: string | null;
   last_report_sent?: string | null;
@@ -35,8 +36,17 @@ interface MonthlyReportPropertyData {
     downPayment?: number;
     secondaryMortgageBalance?: number;
     helocBalance?: number;
+    hasRefinanced?: boolean;
+    currentMortgageBalance?: number;
+    currentInterestRate?: number;
+    currentAmortization?: number;
+    refinanceYear?: number;
   };
   [key: string]: unknown;
+}
+
+interface LatestMonthlyReportMetadata {
+  reportMonth?: unknown;
 }
 
 interface MonthlyReportOptions {
@@ -119,16 +129,16 @@ function normalizePropertyData(raw: Record<string, unknown> | null): MonthlyRepo
   };
 }
 
-async function getDueSubscribers(
+async function getActiveSubscribers(
   limit?: number,
   subscriberId?: string
 ): Promise<SubscriberRecord[]> {
   const supabase = createServerClient();
 
   if (subscriberId) {
-    const { data, error } = await supabase
+      const { data, error } = await supabase
       .from('subscribers')
-      .select('id, email, name, property_data, estimate_id, last_report_sent')
+      .select('id, email, name, workspace_id, property_data, estimate_id, last_report_sent')
       .eq('id', subscriberId)
       .maybeSingle();
 
@@ -139,13 +149,34 @@ async function getDueSubscribers(
     return data ? [data as SubscriberRecord] : [];
   }
 
-  const { data, error } = await supabase.rpc('get_subscribers_due_for_report');
+  const { data, error } = await supabase
+    .from('subscribers')
+    .select('id, email, name, workspace_id, property_data, estimate_id, last_report_sent')
+    .eq('monthly_reports', true)
+    .is('unsubscribed_at', null)
+    .order('subscribed_at', { ascending: true });
+
   if (error) {
     throw error;
   }
 
-  const dueSubscribers = (data ?? []) as SubscriberRecord[];
-  return typeof limit === 'number' ? dueSubscribers.slice(0, limit) : dueSubscribers;
+  const activeSubscribers = (data ?? []) as SubscriberRecord[];
+  return typeof limit === 'number' ? activeSubscribers.slice(0, limit) : activeSubscribers;
+}
+
+function getLastDeliveredReportMonth(
+  propertyData: MonthlyReportPropertyData | null
+): string | null {
+  if (!propertyData || typeof propertyData !== 'object') {
+    return null;
+  }
+
+  const latestMonthlyReport =
+    propertyData.latestMonthlyReport as LatestMonthlyReportMetadata | undefined;
+
+  return typeof latestMonthlyReport?.reportMonth === 'string'
+    ? latestMonthlyReport.reportMonth
+    : null;
 }
 
 function buildUpdatedPropertyData(
@@ -176,7 +207,7 @@ export async function runMonthlyReports(
 ): Promise<MonthlyReportRunSummary> {
   const { dryRun = false, limit, subscriberId } = options;
   const supabase = createServerClient();
-  const subscribers = await getDueSubscribers(limit, subscriberId);
+  const subscribers = await getActiveSubscribers(limit, subscriberId);
 
   const summary: MonthlyReportRunSummary = {
     dryRun,
@@ -214,12 +245,14 @@ export async function runMonthlyReports(
       continue;
     }
 
-    const estimateResult = await calculateEquityBridge({
+      const estimateResult = await calculateEquityBridge({
       region: propertyData.region,
       propertyType: propertyData.propertyType,
       purchaseYear: propertyData.purchaseYear,
       purchaseMonth: propertyData.purchaseMonth,
       purchasePrice: propertyData.purchasePrice,
+    }, {
+      workspaceId: subscriber.workspace_id ?? null,
     });
 
     if ('error' in estimateResult) {
@@ -234,16 +267,47 @@ export async function runMonthlyReports(
     }
 
     const [marketSnapshots, marketStatsHistory] = await Promise.all([
-      getRecentMarketSnapshots(propertyData.region, propertyData.propertyType, 2),
-      getRecentMarketStats(propertyData.region, propertyData.propertyType, 2),
+      getRecentMarketSnapshots(propertyData.region, propertyData.propertyType, 2, {
+        workspaceId: subscriber.workspace_id ?? null,
+      }),
+      getRecentMarketStats(propertyData.region, propertyData.propertyType, 2, {
+        workspaceId: subscriber.workspace_id ?? null,
+      }),
     ]);
 
     const currentSnapshot = marketSnapshots[0] ?? null;
     const previousSnapshot = marketSnapshots[1] ?? null;
     const currentMarketStats = marketStatsHistory[0] ?? estimateResult.currentMarketStats ?? null;
     const previousMarketStats = marketStatsHistory[1] ?? null;
+    const currentReportMonth =
+      currentSnapshot?.reportMonth ?? currentMarketStats?.reportMonth ?? null;
+    const previousReportMonth =
+      previousSnapshot?.reportMonth ?? previousMarketStats?.reportMonth ?? null;
+    const lastDeliveredReportMonth = getLastDeliveredReportMonth(propertyData);
 
-    const mortgageSummary = calculateMortgageSummary({
+    if (!currentReportMonth) {
+      summary.skipped += 1;
+      summary.results.push({
+        subscriberId: subscriber.id,
+        email,
+        status: 'skipped',
+        reason: 'No current report month available for this subscriber',
+      });
+      continue;
+    }
+
+    if (currentReportMonth === lastDeliveredReportMonth) {
+      summary.skipped += 1;
+      summary.results.push({
+        subscriberId: subscriber.id,
+        email,
+        status: 'skipped',
+        reason: `Latest report month ${currentReportMonth} already delivered`,
+      });
+      continue;
+    }
+
+    const mortgagePosition = calculateMortgagePosition({
       purchasePrice: propertyData.purchasePrice,
       purchaseYear: propertyData.purchaseYear,
       purchaseMonth: propertyData.purchaseMonth,
@@ -251,13 +315,20 @@ export async function runMonthlyReports(
       amortizationYears:
         parseInteger(propertyData.mortgageAssumptions.amortization) ?? undefined,
       downPaymentAmount: parseNumber(propertyData.mortgageAssumptions.downPayment) ?? undefined,
+      secondaryMortgageBalance:
+        parseNumber(propertyData.mortgageAssumptions.secondaryMortgageBalance) ?? 0,
+      helocBalance: parseNumber(propertyData.mortgageAssumptions.helocBalance) ?? 0,
+      refinance: {
+        enabled: propertyData.mortgageAssumptions.hasRefinanced === true,
+        currentBalance: parseNumber(propertyData.mortgageAssumptions.currentMortgageBalance) ?? undefined,
+        interestRate: parseNumber(propertyData.mortgageAssumptions.currentInterestRate) ?? undefined,
+        amortizationYears:
+          parseInteger(propertyData.mortgageAssumptions.currentAmortization) ?? undefined,
+        refinanceYear: parseInteger(propertyData.mortgageAssumptions.refinanceYear),
+      },
     });
 
-    const secondaryMortgageBalance =
-      parseNumber(propertyData.mortgageAssumptions.secondaryMortgageBalance) ?? 0;
-    const helocBalance = parseNumber(propertyData.mortgageAssumptions.helocBalance) ?? 0;
-    const totalOutstandingDebt =
-      mortgageSummary.remainingBalance + secondaryMortgageBalance + helocBalance;
+    const totalOutstandingDebt = mortgagePosition.totalOutstandingDebt;
     const estimatedCurrentValue = estimateResult.estimatedCurrentValue;
     const netEquity = calculateNetEquity(estimatedCurrentValue, totalOutstandingDebt);
 
@@ -289,7 +360,7 @@ export async function runMonthlyReports(
       estimatedCurrentValue,
       previousValue,
       netEquity,
-      reportMonth: currentSnapshot?.reportMonth ?? currentMarketStats?.reportMonth ?? null,
+      reportMonth: currentReportMonth,
       scopeAreaName: currentMarketStats?.scopeAreaName ?? propertyData.region,
       dataSource: estimateResult.dataSource,
     };
@@ -317,6 +388,7 @@ export async function runMonthlyReports(
       to: email,
       name: subscriber.name || 'Homeowner',
       subscriberId: subscriber.id,
+      workspaceId: subscriber.workspace_id ?? null,
       estimateId:
         (typeof propertyData.estimateId === 'string' && propertyData.estimateId) ||
         subscriber.estimate_id,
@@ -327,8 +399,8 @@ export async function runMonthlyReports(
       region: propertyData.region,
       propertyType: propertyData.propertyType,
       marketChange: benchmarkPriceChange ?? 0,
-      reportMonth: currentSnapshot?.reportMonth ?? currentMarketStats?.reportMonth ?? null,
-      previousReportMonth: previousSnapshot?.reportMonth ?? previousMarketStats?.reportMonth ?? null,
+      reportMonth: currentReportMonth,
+      previousReportMonth,
       benchmarkPrice,
       benchmarkPriceChange,
       averageSoldPrice: currentMarketStats?.averageSoldPrice ?? null,
@@ -362,7 +434,7 @@ export async function runMonthlyReports(
       estimatedCurrentValue,
       netEquity,
       currentMarketStats,
-      currentSnapshot?.reportMonth ?? currentMarketStats?.reportMonth ?? null,
+      currentReportMonth,
       sentAt
     );
 

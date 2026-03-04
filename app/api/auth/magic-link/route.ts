@@ -32,11 +32,12 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { email, redirectTo, name, propertyData } = body as {
+    const { email, redirectTo, name, propertyData, accountType } = body as {
       email?: string;
       redirectTo?: string;
       name?: string;
       propertyData?: Record<string, unknown>;
+      accountType?: 'homeowner' | 'agent' | 'owner';
     };
 
     if (!email || !email.includes('@')) {
@@ -70,6 +71,7 @@ export async function POST(request: NextRequest) {
         data: {
           name: name || '',
           propertyData: propertyData || {},
+          accountType: accountType || 'homeowner',
         },
       }),
     });

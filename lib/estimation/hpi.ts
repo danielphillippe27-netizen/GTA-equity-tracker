@@ -47,6 +47,10 @@ export interface HPIEstimateInput {
   purchasePrice: number;
 }
 
+export interface MarketDataScope {
+  workspaceId?: string | null;
+}
+
 export interface MarketScenario {
   value: number;
   equity: number;
@@ -119,6 +123,18 @@ function getFallbackAreaIds(areaName: string, primaryAreaId: string): string[] {
   return fallbackAreaIds;
 }
 
+function selectWithWorkspaceScope(
+  supabase: ReturnType<typeof createServerClient>,
+  table: 'market_hpi' | 'market_watch_monthly',
+  columns: string,
+  workspaceId?: string | null
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const query: any = supabase.from(table).select(columns);
+  return workspaceId ? query.eq('workspace_id', workspaceId) : query;
+}
+
 /**
  * Get HPI index for a specific region, property type, and date
  */
@@ -126,7 +142,8 @@ export async function getHPI(
   areaName: string,
   propertyCategory: string,
   year: number,
-  month: number
+  month: number,
+  scope?: MarketDataScope
 ): Promise<number | null> {
   const supabase = createServerClient();
   const period = formatPeriod(year, month);
@@ -135,9 +152,12 @@ export async function getHPI(
     return null;
   }
 
-  const { data, error } = await supabase
-    .from('market_hpi')
-    .select('hpi_index')
+  const { data, error } = await selectWithWorkspaceScope(
+    supabase,
+    'market_hpi',
+    'hpi_index',
+    scope?.workspaceId
+  )
     .eq('area_id', normalized.areaId)
     .eq('property_type_id', normalized.propertyTypeId)
     .eq('period', period)
@@ -145,9 +165,12 @@ export async function getHPI(
 
   if (error || !data) {
     // Try to find the closest available month
-    const { data: closest, error: closestError } = await supabase
-      .from('market_hpi')
-      .select('hpi_index, period')
+    const { data: closest, error: closestError } = await selectWithWorkspaceScope(
+      supabase,
+      'market_hpi',
+      'hpi_index, period',
+      scope?.workspaceId
+    )
       .eq('area_id', normalized.areaId)
       .eq('property_type_id', normalized.propertyTypeId)
       .lte('period', period)
@@ -170,7 +193,8 @@ export async function getHPI(
  */
 export async function getCurrentHPI(
   areaName: string,
-  propertyCategory: string
+  propertyCategory: string,
+  scope?: MarketDataScope
 ): Promise<{ hpi: number; date: string } | null> {
   const supabase = createServerClient();
   const normalized = normalizeLookupInputs(areaName, propertyCategory);
@@ -178,9 +202,12 @@ export async function getCurrentHPI(
     return null;
   }
 
-  const { data, error } = await supabase
-    .from('market_hpi')
-    .select('hpi_index, period')
+  const { data, error } = await selectWithWorkspaceScope(
+    supabase,
+    'market_hpi',
+    'hpi_index, period',
+    scope?.workspaceId
+  )
     .eq('area_id', normalized.areaId)
     .eq('property_type_id', normalized.propertyTypeId)
     .order('period', { ascending: false })
@@ -233,10 +260,14 @@ export async function getBenchmarkPrice(
   areaName: string,
   propertyCategory: string,
   year: number,
-  month: number
+  month: number,
+  options?: MarketDataScope & {
+    allowFutureFallback?: boolean;
+  }
 ): Promise<{ price: number; date: string } | null> {
   const supabase = createServerClient();
   const period = formatPeriod(year, month);
+  const allowFutureFallback = options?.allowFutureFallback ?? true;
   const normalized = normalizeLookupInputs(areaName, propertyCategory);
   if (!normalized.areaId || !normalized.propertyTypeId) {
     return null;
@@ -245,9 +276,12 @@ export async function getBenchmarkPrice(
   console.log('[getBenchmarkPrice] Looking up:', { areaId: normalized.areaId, propertyTypeId: normalized.propertyTypeId, period });
   
   // Try exact match first
-  const { data: exactMatch } = await supabase
-    .from('market_hpi')
-    .select('benchmark_price, period')
+  const { data: exactMatch } = await selectWithWorkspaceScope(
+    supabase,
+    'market_hpi',
+    'benchmark_price, period',
+    options?.workspaceId
+  )
     .eq('area_id', normalized.areaId)
     .eq('property_type_id', normalized.propertyTypeId)
     .eq('period', period)
@@ -264,9 +298,12 @@ export async function getBenchmarkPrice(
   }
   
   // Try nearest prior month
-  const { data: priorMatch } = await supabase
-    .from('market_hpi')
-    .select('benchmark_price, period')
+  const { data: priorMatch } = await selectWithWorkspaceScope(
+    supabase,
+    'market_hpi',
+    'benchmark_price, period',
+    options?.workspaceId
+  )
     .eq('area_id', normalized.areaId)
     .eq('property_type_id', normalized.propertyTypeId)
     .lte('period', period)
@@ -283,10 +320,22 @@ export async function getBenchmarkPrice(
     };
   }
   
+  if (!allowFutureFallback) {
+    console.log('[getBenchmarkPrice] Future fallback disabled:', {
+      areaId: normalized.areaId,
+      propertyTypeId: normalized.propertyTypeId,
+      period,
+    });
+    return null;
+  }
+
   // Try nearest future month as last resort
-  const { data: futureMatch } = await supabase
-    .from('market_hpi')
-    .select('benchmark_price, period')
+  const { data: futureMatch } = await selectWithWorkspaceScope(
+    supabase,
+    'market_hpi',
+    'benchmark_price, period',
+    options?.workspaceId
+  )
     .eq('area_id', normalized.areaId)
     .eq('property_type_id', normalized.propertyTypeId)
     .gte('period', period)
@@ -313,7 +362,8 @@ export async function getBenchmarkPrice(
  */
 export async function getCurrentBenchmarkPrice(
   areaName: string,
-  propertyCategory: string
+  propertyCategory: string,
+  scope?: MarketDataScope
 ): Promise<{ price: number; date: string } | null> {
   const normalized = normalizeLookupInputs(areaName, propertyCategory);
   if (!normalized.areaId || !normalized.propertyTypeId) {
@@ -321,7 +371,7 @@ export async function getCurrentBenchmarkPrice(
   }
 
   // Check cache first
-  const cacheKey = `${normalized.areaId}:${normalized.propertyTypeId}`;
+  const cacheKey = `${scope?.workspaceId ?? 'global'}:${normalized.areaId}:${normalized.propertyTypeId}`;
   if (currentBenchmarkCache.has(cacheKey)) {
     console.log('[getCurrentBenchmarkPrice] Cache hit:', cacheKey);
     return currentBenchmarkCache.get(cacheKey)!;
@@ -330,9 +380,12 @@ export async function getCurrentBenchmarkPrice(
   const supabase = createServerClient();
   console.log('[getCurrentBenchmarkPrice] Looking up:', { areaId: normalized.areaId, propertyTypeId: normalized.propertyTypeId });
   
-  const { data, error } = await supabase
-    .from('market_hpi')
-    .select('benchmark_price, period')
+  const { data, error } = await selectWithWorkspaceScope(
+    supabase,
+    'market_hpi',
+    'benchmark_price, period',
+    scope?.workspaceId
+  )
     .eq('area_id', normalized.areaId)
     .eq('property_type_id', normalized.propertyTypeId)
     .not('benchmark_price', 'is', null)
@@ -367,7 +420,8 @@ export function clearBenchmarkCache(): void {
 export async function getRecentMarketSnapshots(
   areaName: string,
   propertyCategory: string,
-  limit: number = 2
+  limit: number = 2,
+  scope?: MarketDataScope
 ): Promise<MarketSnapshot[]> {
   const supabase = createServerClient();
   const normalized = normalizeLookupInputs(areaName, propertyCategory);
@@ -375,9 +429,12 @@ export async function getRecentMarketSnapshots(
     return [];
   }
 
-  const { data, error } = await supabase
-    .from('market_hpi')
-    .select('period, hpi_index, benchmark_price')
+  const { data, error } = await selectWithWorkspaceScope(
+    supabase,
+    'market_hpi',
+    'period, hpi_index, benchmark_price',
+    scope?.workspaceId
+  )
     .eq('area_id', normalized.areaId)
     .eq('property_type_id', normalized.propertyTypeId)
     .order('period', { ascending: false })
@@ -387,7 +444,7 @@ export async function getRecentMarketSnapshots(
     return [];
   }
 
-  return data.map((row) => ({
+  return data.map((row: any) => ({
     reportMonth: row.period,
     hpiIndex: row.hpi_index,
     benchmarkPrice: row.benchmark_price,
@@ -397,7 +454,8 @@ export async function getRecentMarketSnapshots(
 export async function getRecentMarketStats(
   areaName: string,
   propertyCategory: string,
-  limit: number = 2
+  limit: number = 2,
+  scope?: MarketDataScope
 ): Promise<CurrentMarketStats[]> {
   const normalized = normalizeLookupInputs(areaName, propertyCategory);
   if (!normalized.areaId || !normalized.propertyTypeId) {
@@ -408,9 +466,12 @@ export async function getRecentMarketStats(
   const fallbackAreaIds = getFallbackAreaIds(areaName, normalized.areaId);
 
   for (const [index, areaId] of fallbackAreaIds.entries()) {
-    const { data, error } = await supabase
-      .from('market_watch_monthly')
-      .select('sales, new_listings, active_listings, avg_sold_price, dom, snlr, moi, period')
+    const { data, error } = await selectWithWorkspaceScope(
+      supabase,
+      'market_watch_monthly',
+      'sales, new_listings, active_listings, avg_sold_price, dom, snlr, moi, period',
+      scope?.workspaceId
+    )
       .eq('area_id', areaId)
       .eq('property_type_id', normalized.propertyTypeId)
       .order('period', { ascending: false })
@@ -421,7 +482,7 @@ export async function getRecentMarketStats(
     }
 
     const area = getAreaTaxonomyById(areaId);
-    return data.map((row) => ({
+    return data.map((row: any) => ({
       sales: parseNumericField(row.sales),
       newListings: parseNumericField(row.new_listings),
       activeListings: parseNumericField(row.active_listings),
@@ -442,19 +503,20 @@ export async function getRecentMarketStats(
 
 export async function getCurrentMarketStats(
   areaName: string,
-  propertyCategory: string
+  propertyCategory: string,
+  scope?: MarketDataScope
 ): Promise<CurrentMarketStats | null> {
   const normalized = normalizeLookupInputs(areaName, propertyCategory);
   if (!normalized.areaId || !normalized.propertyTypeId) {
     return null;
   }
 
-  const cacheKey = `${normalized.areaId}:${normalized.propertyTypeId}`;
+  const cacheKey = `${scope?.workspaceId ?? 'global'}:${normalized.areaId}:${normalized.propertyTypeId}`;
   if (currentMarketStatsCache.has(cacheKey)) {
     return currentMarketStatsCache.get(cacheKey)!;
   }
 
-  const [currentStats] = await getRecentMarketStats(areaName, propertyCategory, 1);
+  const [currentStats] = await getRecentMarketStats(areaName, propertyCategory, 1, scope);
   if (currentStats) {
     currentMarketStatsCache.set(cacheKey, currentStats);
     return currentStats;
@@ -470,7 +532,8 @@ export async function getHPITrend(
   areaName: string,
   propertyCategory: string,
   fromYear: number,
-  fromMonth: number
+  fromMonth: number,
+  scope?: MarketDataScope
 ): Promise<HPIDataPoint[]> {
   const supabase = createServerClient();
   const fromPeriod = formatPeriod(fromYear, fromMonth);
@@ -479,9 +542,12 @@ export async function getHPITrend(
     return [];
   }
 
-  const { data, error } = await supabase
-    .from('market_hpi')
-    .select('period, hpi_index, benchmark_price')
+  const { data, error } = await selectWithWorkspaceScope(
+    supabase,
+    'market_hpi',
+    'period, hpi_index, benchmark_price',
+    scope?.workspaceId
+  )
     .eq('area_id', normalized.areaId)
     .eq('property_type_id', normalized.propertyTypeId)
     .gte('period', fromPeriod)
@@ -491,7 +557,7 @@ export async function getHPITrend(
     return [];
   }
 
-  return data.map((row) => ({
+  return data.map((row: any) => ({
     reportMonth: row.period,
     hpiIndex: row.hpi_index,
     benchmarkPrice: row.benchmark_price,
@@ -646,7 +712,8 @@ export async function getAvailablePropertyTypes(): Promise<string[]> {
  */
 export async function getHPIDateRange(
   areaName: string,
-  propertyCategory: string
+  propertyCategory: string,
+  scope?: MarketDataScope
 ): Promise<{ earliest: string; latest: string } | null> {
   const supabase = createServerClient();
   const normalized = normalizeLookupInputs(areaName, propertyCategory);
@@ -655,9 +722,12 @@ export async function getHPIDateRange(
   }
 
   // Get earliest
-  const { data: earliest } = await supabase
-    .from('market_hpi')
-    .select('period')
+  const { data: earliest } = await selectWithWorkspaceScope(
+    supabase,
+    'market_hpi',
+    'period',
+    scope?.workspaceId
+  )
     .eq('area_id', normalized.areaId)
     .eq('property_type_id', normalized.propertyTypeId)
     .order('period', { ascending: true })
@@ -665,9 +735,12 @@ export async function getHPIDateRange(
     .single();
 
   // Get latest
-  const { data: latest } = await supabase
-    .from('market_hpi')
-    .select('period')
+  const { data: latest } = await selectWithWorkspaceScope(
+    supabase,
+    'market_hpi',
+    'period',
+    scope?.workspaceId
+  )
     .eq('area_id', normalized.areaId)
     .eq('property_type_id', normalized.propertyTypeId)
     .order('period', { ascending: false })
@@ -710,14 +783,15 @@ function calculateScenario(
  * Calculate HPI-based equity estimate
  */
 export async function calculateHPIEquity(
-  input: HPIEstimateInput
+  input: HPIEstimateInput,
+  scope?: MarketDataScope
 ): Promise<HPIEstimateResult | { error: string }> {
   const { region, propertyType, purchaseYear, purchaseMonth, purchasePrice } = input;
 
   console.log('[HPI Equity] Calculating for:', { region, propertyType, purchaseYear, purchaseMonth, purchasePrice });
 
   // Get HPI at purchase date
-  const hpiAtPurchase = await getHPI(region, propertyType, purchaseYear, purchaseMonth);
+  const hpiAtPurchase = await getHPI(region, propertyType, purchaseYear, purchaseMonth, scope);
   console.log('[HPI Equity] HPI at purchase:', hpiAtPurchase);
   
   if (!hpiAtPurchase) {
@@ -728,7 +802,7 @@ export async function calculateHPIEquity(
   }
 
   // Get current HPI
-  const currentHPI = await getCurrentHPI(region, propertyType);
+  const currentHPI = await getCurrentHPI(region, propertyType, scope);
   console.log('[HPI Equity] Current HPI:', currentHPI);
   
   if (!currentHPI) {
@@ -745,7 +819,7 @@ export async function calculateHPIEquity(
   const roiPercent = Math.round((appreciationFactor - 1) * 100 * 10) / 10;
 
   // Get HPI trend for chart
-  const hpiTrend = await getHPITrend(region, propertyType, purchaseYear, purchaseMonth);
+  const hpiTrend = await getHPITrend(region, propertyType, purchaseYear, purchaseMonth, scope);
 
   // Calculate market scenarios
   const scenarios = {

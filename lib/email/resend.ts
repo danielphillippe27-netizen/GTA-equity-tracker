@@ -2,6 +2,7 @@ import { Resend } from 'resend';
 import { createServerClient } from '@/lib/supabase/server';
 
 const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
+const RESEND_FALLBACK_FROM_EMAIL = 'onboarding@resend.dev';
 
 function getResendClient() {
   if (!process.env.RESEND_API_KEY) {
@@ -9,6 +10,40 @@ function getResendClient() {
   }
 
   return new Resend(process.env.RESEND_API_KEY);
+}
+
+function shouldRetryWithFallbackSender(error: unknown): boolean {
+  if (FROM_EMAIL === RESEND_FALLBACK_FROM_EMAIL || !error || typeof error !== 'object') {
+    return false;
+  }
+
+  const maybeError = error as { statusCode?: number; message?: string };
+  return (
+    maybeError.statusCode === 403 &&
+    typeof maybeError.message === 'string' &&
+    maybeError.message.toLowerCase().includes('domain is not verified')
+  );
+}
+
+async function sendWithSenderFallback(
+  resend: Resend,
+  payload: Parameters<Resend['emails']['send']>[0]
+) {
+  const initialResult = await resend.emails.send(payload);
+  if (!initialResult.error || !shouldRetryWithFallbackSender(initialResult.error)) {
+    return initialResult;
+  }
+
+  if (!payload.from) {
+    return initialResult;
+  }
+
+  console.warn('[Resend] Retrying with fallback sender because custom domain is not verified.');
+  const retryFrom = payload.from.replace(FROM_EMAIL, RESEND_FALLBACK_FROM_EMAIL);
+  return resend.emails.send({
+    ...payload,
+    from: retryFrom,
+  });
 }
 
 function getAppBaseUrl(): string {
@@ -52,7 +87,7 @@ function buildPreciseEvaluationUrl(
   const recipient =
     process.env.CMA_REQUEST_NOTIFY_EMAIL ||
     process.env.RESEND_FROM_EMAIL ||
-    'info@phillippegroup.ca';
+    'info@equitytracker.ca';
   const subject = `Precise home evaluation request from ${titleCaseName(name)}`;
   const lines = [
     'Hi The Phillippe Group,',
@@ -87,12 +122,14 @@ interface SendWelcomeEmailParams {
   region: string;
   propertyType: string;
   subscriberId?: string;
+  workspaceId?: string | null;
 }
 
 interface SendMonthlyReportParams {
   to: string;
   name: string;
   subscriberId: string;
+  workspaceId?: string | null;
   estimateId?: string | null;
   estimatedValue: number;
   previousValue: number;
@@ -124,6 +161,21 @@ interface SendCmaRequestNotificationParams {
   estimateId?: string | null;
   preferredContactMethod?: string | null;
   notes?: string | null;
+  workspaceId?: string | null;
+}
+
+interface EmailEventMetadata {
+  [key: string]: unknown;
+}
+
+interface RecordEmailEventParams {
+  workspaceId?: string | null;
+  subscriberId?: string | null;
+  emailType: 'welcome' | 'monthly_report' | 'cma_request_notification';
+  status: 'sent' | 'failed';
+  recipientEmail: string;
+  resendMessageId?: string | null;
+  metadata?: EmailEventMetadata;
 }
 
 function formatCurrency(value: number): string {
@@ -231,6 +283,77 @@ async function buildDashboardLoginUrl(
   return buildDashboardUrl(estimateId);
 }
 
+async function resolveEmailEventWorkspaceId(
+  workspaceId?: string | null,
+  subscriberId?: string | null
+): Promise<string | null> {
+  if (workspaceId) {
+    return workspaceId;
+  }
+
+  if (!subscriberId) {
+    return null;
+  }
+
+  try {
+    const supabase = createServerClient();
+    const { data, error } = await supabase
+      .from('subscribers')
+      .select('workspace_id')
+      .eq('id', subscriberId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[Resend] Failed to resolve workspace for email event:', error.message);
+      return null;
+    }
+
+    return (data?.workspace_id as string | null | undefined) ?? null;
+  } catch (error) {
+    console.warn('[Resend] Failed to resolve workspace for email event:', error);
+    return null;
+  }
+}
+
+async function recordEmailEvent({
+  workspaceId,
+  subscriberId,
+  emailType,
+  status,
+  recipientEmail,
+  resendMessageId,
+  metadata,
+}: RecordEmailEventParams) {
+  const resolvedWorkspaceId = await resolveEmailEventWorkspaceId(workspaceId, subscriberId);
+
+  if (!resolvedWorkspaceId) {
+    return;
+  }
+
+  try {
+    const supabase = createServerClient();
+    const { error } = await supabase.from('email_events').insert({
+      workspace_id: resolvedWorkspaceId,
+      subscriber_id: subscriberId ?? null,
+      email_type: emailType,
+      status,
+      recipient_email: recipientEmail,
+      resend_message_id: resendMessageId ?? null,
+      metadata: metadata ?? {},
+    });
+
+    if (error) {
+      if (error.code === '42P01') {
+        return;
+      }
+
+      console.warn('[Resend] Failed to record email event:', error.message);
+    }
+  } catch (error) {
+    console.warn('[Resend] Failed to record email event:', error);
+  }
+}
+
 function renderMetricCard(
   label: string,
   value: string,
@@ -255,6 +378,7 @@ export async function sendWelcomeEmail({
   region,
   propertyType,
   subscriberId,
+  workspaceId,
 }: SendWelcomeEmailParams) {
   const firstName = name.split(' ')[0] || 'there';
   const resend = getResendClient();
@@ -267,7 +391,7 @@ export async function sendWelcomeEmail({
   const unsubscribeUrl = buildUnsubscribeUrl(subscriberId, to);
 
   try {
-    const { data, error } = await resend.emails.send({
+    const { data, error } = await sendWithSenderFallback(resend, {
       from: `GTA Equity Tracker <${FROM_EMAIL}>`,
       to: [to],
       subject: `Welcome to GTA Equity Tracker - Your ${region} ${propertyType} Report`,
@@ -303,7 +427,7 @@ export async function sendWelcomeEmail({
               </table>
               <p style="margin: 0 0 20px; color: #94a3b8; font-size: 14px; line-height: 1.6;">
                 <strong style="color: #ffffff;">What happens next?</strong><br>
-                Every month, we'll send you an updated equity report with live GTA market statistics from the latest TRREB data loaded into Supabase.
+                We'll send a fresh equity update each time a new monthly TRREB data release is loaded.
               </p>
               <p style="margin: 0; color: #94a3b8; font-size: 14px;">
                 Stay wealthy,<br>
@@ -330,13 +454,54 @@ export async function sendWelcomeEmail({
 
     if (error) {
       console.error('[Resend] Welcome email error:', error);
+      await recordEmailEvent({
+        workspaceId,
+        subscriberId,
+        emailType: 'welcome',
+        status: 'failed',
+        recipientEmail: to,
+        metadata: {
+          region,
+          propertyType,
+          reason:
+            error instanceof Error
+              ? error.message
+              : typeof error === 'object' && error && 'message' in error
+                ? String(error.message)
+                : String(error),
+        },
+      });
       return { success: false, error };
     }
 
     console.log('[Resend] Welcome email sent:', data);
+    await recordEmailEvent({
+      workspaceId,
+      subscriberId,
+      emailType: 'welcome',
+      status: 'sent',
+      recipientEmail: to,
+      resendMessageId: data?.id ?? null,
+      metadata: {
+        region,
+        propertyType,
+      },
+    });
     return { success: true, data };
   } catch (error) {
     console.error('[Resend] Welcome email exception:', error);
+    await recordEmailEvent({
+      workspaceId,
+      subscriberId,
+      emailType: 'welcome',
+      status: 'failed',
+      recipientEmail: to,
+      metadata: {
+        region,
+        propertyType,
+        reason: error instanceof Error ? error.message : String(error),
+      },
+    });
     return { success: false, error };
   }
 }
@@ -345,6 +510,7 @@ export async function sendMonthlyReport({
   to,
   name,
   subscriberId,
+  workspaceId,
   estimateId,
   estimatedValue,
   previousValue,
@@ -390,7 +556,7 @@ export async function sendMonthlyReport({
   const thisMonthPercent = `(${formatPercent(valueChangePercent)} vs last report)`;
 
   try {
-    const { data, error } = await resend.emails.send({
+    const { data, error } = await sendWithSenderFallback(resend, {
       from: `GTA Equity Tracker <${FROM_EMAIL}>`,
       to: [to],
       subject: `${firstName}, your home is now worth ${formatCurrency(estimatedValue)}`,
@@ -503,13 +669,60 @@ export async function sendMonthlyReport({
 
     if (error) {
       console.error('[Resend] Monthly report error:', error);
+      await recordEmailEvent({
+        workspaceId,
+        subscriberId,
+        emailType: 'monthly_report',
+        status: 'failed',
+        recipientEmail: to,
+        metadata: {
+          estimateId,
+          reportMonth,
+          region,
+          propertyType,
+          reason:
+            error instanceof Error
+              ? error.message
+              : typeof error === 'object' && error && 'message' in error
+                ? String(error.message)
+                : String(error),
+        },
+      });
       return { success: false, error };
     }
 
     console.log('[Resend] Monthly report sent:', data);
+    await recordEmailEvent({
+      workspaceId,
+      subscriberId,
+      emailType: 'monthly_report',
+      status: 'sent',
+      recipientEmail: to,
+      resendMessageId: data?.id ?? null,
+      metadata: {
+        estimateId,
+        reportMonth,
+        region,
+        propertyType,
+      },
+    });
     return { success: true, data };
   } catch (error) {
     console.error('[Resend] Monthly report exception:', error);
+    await recordEmailEvent({
+      workspaceId,
+      subscriberId,
+      emailType: 'monthly_report',
+      status: 'failed',
+      recipientEmail: to,
+      metadata: {
+        estimateId,
+        reportMonth,
+        region,
+        propertyType,
+        reason: error instanceof Error ? error.message : String(error),
+      },
+    });
     return { success: false, error };
   }
 }
@@ -521,6 +734,7 @@ export async function sendCmaRequestNotification({
   estimateId,
   preferredContactMethod,
   notes,
+  workspaceId,
 }: SendCmaRequestNotificationParams) {
   const resend = getResendClient();
   const recipient = getCmaRequestNotificationRecipient();
@@ -545,7 +759,7 @@ export async function sendCmaRequestNotification({
   ];
 
   try {
-    const { data, error } = await resend.emails.send({
+    const { data, error } = await sendWithSenderFallback(resend, {
       from: `The Phillippe Group <${FROM_EMAIL}>`,
       to: [recipient],
       subject: `New precise home evaluation request from ${name}`,
@@ -595,12 +809,50 @@ export async function sendCmaRequestNotification({
 
     if (error) {
       console.error('[Resend] CMA request notification error:', error);
+      await recordEmailEvent({
+        workspaceId,
+        emailType: 'cma_request_notification',
+        status: 'failed',
+        recipientEmail: recipient,
+        metadata: {
+          estimateId,
+          requestEmail: email,
+          reason:
+            error instanceof Error
+              ? error.message
+              : typeof error === 'object' && error && 'message' in error
+                ? String(error.message)
+                : String(error),
+        },
+      });
       return { success: false, error };
     }
 
+    await recordEmailEvent({
+      workspaceId,
+      emailType: 'cma_request_notification',
+      status: 'sent',
+      recipientEmail: recipient,
+      resendMessageId: data?.id ?? null,
+      metadata: {
+        estimateId,
+        requestEmail: email,
+      },
+    });
     return { success: true, data };
   } catch (error) {
     console.error('[Resend] CMA request notification exception:', error);
+    await recordEmailEvent({
+      workspaceId,
+      emailType: 'cma_request_notification',
+      status: 'failed',
+      recipientEmail: recipient,
+      metadata: {
+        estimateId,
+        requestEmail: email,
+        reason: error instanceof Error ? error.message : String(error),
+      },
+    });
     return { success: false, error };
   }
 }

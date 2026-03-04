@@ -61,6 +61,9 @@ A premium, funnel-based web application that estimates a homeowner's current hom
 Create a `.env.local` file with the following variables:
 
 ```env
+# App URL
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
 # Supabase Configuration
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
@@ -190,7 +193,7 @@ npm run lint     # Run ESLint
 
 1. Push to GitHub
 2. Import to Vercel
-3. Configure environment variables
+3. Configure environment variables, including `NEXT_PUBLIC_APP_URL=https://equitytracker.ca`
 4. Deploy
 
 ### Other Platforms

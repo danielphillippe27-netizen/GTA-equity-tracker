@@ -9,10 +9,33 @@ const inter = Inter({
   variable: "--font-sans",
 });
 
+function getMetadataBase(): URL {
+  const configuredBaseUrl =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.APP_URL ||
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+    "http://localhost:3000";
+
+  const normalizedBaseUrl = configuredBaseUrl.startsWith("http")
+    ? configuredBaseUrl
+    : `https://${configuredBaseUrl}`;
+
+  try {
+    return new URL(normalizedBaseUrl);
+  } catch {
+    return new URL("http://localhost:3000");
+  }
+}
+
 export const metadata: Metadata = {
+  metadataBase: getMetadataBase(),
   title: "GTA Equity Tracker | Track Your Home Equity",
   description:
     "Market-based equity estimates using GTA real estate data from 1996–present. Get a clear picture of your home's current value and equity.",
+  alternates: {
+    canonical: "/",
+  },
   keywords: [
     "GTA home equity",
     "Toronto real estate",
@@ -27,6 +50,7 @@ export const metadata: Metadata = {
       "Market-based equity estimates using GTA real estate data from 1996–present.",
     type: "website",
     locale: "en_CA",
+    url: "/",
   },
   robots: {
     index: true,

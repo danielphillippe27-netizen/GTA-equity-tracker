@@ -1,13 +1,20 @@
-'use client';
-
 import Link from 'next/link';
 import { GlowButton } from '@/components/shared';
 
-export default function AuthCodeErrorPage() {
+export default async function AuthCodeErrorPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ message?: string }>;
+}) {
+  const params = await searchParams;
+  const message =
+    params.message ||
+    'There was a problem signing you in. The link may have expired or already been used. Please try again.';
+
   return (
-    <main className="min-h-screen bg-background flex items-center justify-center px-4">
-      <div className="text-center max-w-md">
-        <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-4">
+    <main className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="max-w-md text-center">
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10">
           <svg
             className="h-8 w-8 text-destructive"
             fill="none"
@@ -22,13 +29,8 @@ export default function AuthCodeErrorPage() {
             />
           </svg>
         </div>
-        <h1 className="text-xl font-semibold text-foreground mb-2">
-          Authentication Error
-        </h1>
-        <p className="text-muted-foreground mb-6">
-          There was a problem signing you in. The link may have expired or already been used. 
-          Please try again.
-        </p>
+        <h1 className="mb-2 text-xl font-semibold text-foreground">Authentication Error</h1>
+        <p className="mb-6 text-muted-foreground">{message}</p>
         <Link href="/">
           <GlowButton>Back to Home</GlowButton>
         </Link>

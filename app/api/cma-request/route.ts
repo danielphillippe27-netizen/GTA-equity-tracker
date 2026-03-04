@@ -37,13 +37,25 @@ export async function POST(request: NextRequest) {
 
     // Generate request ID
     const requestId = uuidv4();
+    let workspaceId: string | null = null;
 
     // Store in database if Supabase is configured
     if (isSupabaseServerConfigured()) {
       const supabase = createServerClient();
 
+      if (estimateId) {
+        const { data: estimate } = await supabase
+          .from('estimates')
+          .select('workspace_id')
+          .eq('id', estimateId)
+          .maybeSingle();
+
+        workspaceId = (estimate?.workspace_id as string | undefined) ?? null;
+      }
+
       const insertPayload = {
         id: requestId,
+        workspace_id: workspaceId,
         estimate_id: estimateId || null,
         session_id: sessionId || null,
         name: name.trim(),
@@ -95,6 +107,7 @@ export async function POST(request: NextRequest) {
       estimateId: estimateId || null,
       preferredContactMethod: preferredContactMethod || 'email',
       notes: notes?.trim() || null,
+      workspaceId,
     });
 
     if (!notificationResult.success) {

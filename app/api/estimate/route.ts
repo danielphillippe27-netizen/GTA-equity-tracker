@@ -9,6 +9,7 @@ import {
 import { calculateEquityBridge, getDataEraLabel } from '@/lib/calculation/bridge-calculator';
 import { getDataEra, HPI_START_YEAR } from '@/src/data/historic-averages';
 import { v4 as uuidv4 } from 'uuid';
+import { getWorkspaceBySlug } from '@/lib/workspaces';
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,6 +18,7 @@ export async function POST(request: NextRequest) {
     
     const {
       sessionId,
+      workspaceSlug,
       region,
       propertyType,
       purchaseYear,
@@ -26,6 +28,7 @@ export async function POST(request: NextRequest) {
 
     console.log('[Estimate API] Parsed values:', {
       sessionId,
+      workspaceSlug,
       region,
       propertyType,
       purchaseYear,
@@ -61,10 +64,21 @@ export async function POST(request: NextRequest) {
       purchasePrice,
     };
 
+    const workspace = workspaceSlug ? await getWorkspaceBySlug(workspaceSlug) : null;
+
+    if (!workspace) {
+      return NextResponse.json(
+        { error: 'A valid workspace slug is required for estimate generation.' },
+        { status: 400 }
+      );
+    }
+
     console.log('[Estimate API] Calling calculateEquityBridge with:', estimateInput);
 
     // Calculate equity using the bridge strategy (handles both eras)
-    const result = await calculateEquityBridge(estimateInput);
+    const result = await calculateEquityBridge(estimateInput, {
+      workspaceId: workspace.id,
+    });
 
     console.log('[Estimate API] Bridge calculation result:', JSON.stringify(result, null, 2));
 
@@ -90,6 +104,7 @@ export async function POST(request: NextRequest) {
       
       const { error } = await supabase.from('estimates').insert({
         id: estimateId,
+        workspace_id: workspace.id,
         session_id: sessionId || uuidv4(),
         address: `${region} - ${propertyType}`,
         purchase_year: result.input.purchaseYear,
@@ -203,6 +218,8 @@ export async function GET(request: NextRequest) {
       purchaseYear: data.purchase_year,
       purchaseMonth: data.purchase_month,
       purchasePrice: data.purchase_price,
+    }, {
+      workspaceId: data.workspace_id ?? null,
     });
 
     // Transform database record back to result format

@@ -24,7 +24,9 @@ import {
 } from '@/lib/estimate-storage';
 import {
   calculateMonthlyPayment,
+  calculateMortgagePosition,
   calculateMortgageSummary,
+  calculatePreviousBalanceFromCurrentBalance,
   calculateRemainingBalance,
   calculateNetEquity,
 } from '@/lib/calculation/mortgage-calculator';
@@ -51,6 +53,11 @@ interface EditableMortgageAssumptions {
   downPayment: number;
   secondaryMortgageBalance: number;
   helocBalance: number;
+  hasRefinanced: boolean;
+  currentMortgageBalance: number;
+  currentInterestRate: number;
+  currentAmortization: number;
+  refinanceYear: number;
 }
 
 function formatPurchaseLabel(year: number, month: number) {
@@ -70,6 +77,44 @@ function formatPeriodLabel(period: string) {
     month: 'long',
     year: 'numeric',
   });
+}
+
+function calculateRemainingAmortizationYears(totalAmortizationYears: number, monthsElapsed: number) {
+  return Math.max(1, Math.ceil((totalAmortizationYears * 12 - monthsElapsed) / 12));
+}
+
+function buildEditableMortgageAssumptions(
+  propertyData: EstimatePropertyData
+): EditableMortgageAssumptions {
+  const baseSummary = calculateMortgageSummary({
+    purchasePrice: propertyData.purchasePrice,
+    purchaseYear: propertyData.purchaseYear,
+    purchaseMonth: propertyData.purchaseMonth,
+    interestRate: propertyData.mortgageAssumptions.interestRate,
+    amortizationYears: propertyData.mortgageAssumptions.amortization,
+    downPaymentAmount: propertyData.mortgageAssumptions.downPayment,
+  });
+
+  return {
+    interestRate: propertyData.mortgageAssumptions.interestRate,
+    amortization: propertyData.mortgageAssumptions.amortization,
+    downPayment: propertyData.mortgageAssumptions.downPayment,
+    secondaryMortgageBalance: propertyData.mortgageAssumptions.secondaryMortgageBalance ?? 0,
+    helocBalance: propertyData.mortgageAssumptions.helocBalance ?? 0,
+    hasRefinanced: propertyData.mortgageAssumptions.hasRefinanced ?? false,
+    currentMortgageBalance:
+      propertyData.mortgageAssumptions.currentMortgageBalance ?? baseSummary.remainingBalance,
+    currentInterestRate:
+      propertyData.mortgageAssumptions.currentInterestRate ??
+      propertyData.mortgageAssumptions.interestRate,
+    currentAmortization:
+      propertyData.mortgageAssumptions.currentAmortization ??
+      calculateRemainingAmortizationYears(
+        propertyData.mortgageAssumptions.amortization,
+        baseSummary.monthsElapsed
+      ),
+    refinanceYear: propertyData.mortgageAssumptions.refinanceYear ?? new Date().getFullYear(),
+  };
 }
 
 function buildInterpretation({
@@ -99,6 +144,14 @@ function buildInterpretation({
   }
 
   return `${movementText} Based on your mortgage assumptions, that leaves about ${formatCurrency(netEquity)} in estimated equity today, built from both market movement and principal paydown.`;
+}
+
+function percentChange(current: number | null, previous: number | null): number | null {
+  if (current === null || previous === null || previous <= 0) {
+    return null;
+  }
+
+  return ((current - previous) / previous) * 100;
 }
 
 export default function ResultsPage() {
@@ -186,13 +239,7 @@ export default function ResultsPage() {
         return current;
       }
 
-      return {
-        interestRate: propertyData.mortgageAssumptions.interestRate,
-        amortization: propertyData.mortgageAssumptions.amortization,
-        downPayment: propertyData.mortgageAssumptions.downPayment,
-        secondaryMortgageBalance: propertyData.mortgageAssumptions.secondaryMortgageBalance ?? 0,
-        helocBalance: propertyData.mortgageAssumptions.helocBalance ?? 0,
-      };
+      return buildEditableMortgageAssumptions(propertyData);
     });
   }, [propertyData]);
 
@@ -210,6 +257,11 @@ export default function ResultsPage() {
         downPayment: editableAssumptions.downPayment,
         secondaryMortgageBalance: editableAssumptions.secondaryMortgageBalance,
         helocBalance: editableAssumptions.helocBalance,
+        hasRefinanced: editableAssumptions.hasRefinanced,
+        currentMortgageBalance: editableAssumptions.currentMortgageBalance,
+        currentInterestRate: editableAssumptions.currentInterestRate,
+        currentAmortization: editableAssumptions.currentAmortization,
+        refinanceYear: editableAssumptions.refinanceYear,
       },
     });
   }, [editableAssumptions, propertyData]);
@@ -219,25 +271,27 @@ export default function ResultsPage() {
       return null;
     }
 
-    const summary = calculateMortgageSummary({
+    const position = calculateMortgagePosition({
       purchasePrice: propertyData.purchasePrice,
       purchaseYear: propertyData.purchaseYear,
       purchaseMonth: propertyData.purchaseMonth,
       interestRate: editableAssumptions.interestRate,
       amortizationYears: editableAssumptions.amortization,
       downPaymentAmount: editableAssumptions.downPayment,
+      secondaryMortgageBalance: editableAssumptions.secondaryMortgageBalance,
+      helocBalance: editableAssumptions.helocBalance,
+      refinance: {
+        enabled: editableAssumptions.hasRefinanced,
+        currentBalance: editableAssumptions.currentMortgageBalance,
+        interestRate: editableAssumptions.currentInterestRate,
+        amortizationYears: editableAssumptions.currentAmortization,
+        refinanceYear: editableAssumptions.refinanceYear,
+      },
     });
-    const secondaryMortgageBalance = editableAssumptions.secondaryMortgageBalance;
-    const helocBalance = editableAssumptions.helocBalance;
-    const totalOutstandingDebt =
-      summary.remainingBalance + secondaryMortgageBalance + helocBalance;
 
     return {
-      summary,
-      secondaryMortgageBalance,
-      helocBalance,
-      totalOutstandingDebt,
-      netEquity: calculateNetEquity(result.estimatedCurrentValue, totalOutstandingDebt),
+      ...position,
+      netEquity: calculateNetEquity(result.estimatedCurrentValue, position.totalOutstandingDebt),
     };
   }, [editableAssumptions, propertyData, result]);
 
@@ -286,27 +340,33 @@ export default function ResultsPage() {
   const purchaseLabel = formatPurchaseLabel(result.input.purchaseYear, result.input.purchaseMonth);
   const marketChangePercent =
     result.hpiAtPurchase > 0 ? ((result.hpiCurrent / result.hpiAtPurchase) - 1) * 100 : null;
-  const benchmarkRangeLow = mortgagePosition
-    ? calculateNetEquity(result.scenarios.soft.value, mortgagePosition.totalOutstandingDebt)
-    : null;
-  const benchmarkRangeHigh = mortgagePosition
-    ? calculateNetEquity(result.scenarios.hot.value, mortgagePosition.totalOutstandingDebt)
-    : null;
+  const currentTrendPoint =
+    result.hpiTrend && result.hpiTrend.length > 0
+      ? result.hpiTrend[result.hpiTrend.length - 1]
+      : null;
   const previousTrendPoint =
     result.hpiTrend && result.hpiTrend.length > 1
       ? result.hpiTrend[result.hpiTrend.length - 2]
       : null;
+  const currentTrendMetric =
+    currentTrendPoint?.benchmarkPrice ?? currentTrendPoint?.hpiIndex ?? null;
+  const previousTrendMetric =
+    previousTrendPoint?.benchmarkPrice ?? previousTrendPoint?.hpiIndex ?? null;
   const monthOverMonthValuePercent =
-    previousTrendPoint && previousTrendPoint.hpiIndex > 0
-      ? ((result.hpiCurrent / previousTrendPoint.hpiIndex) - 1) * 100
-      : null;
+    percentChange(currentTrendMetric, previousTrendMetric);
   const previousMortgageBalance = mortgagePosition
-    ? calculateRemainingBalance(
-        mortgagePosition.summary.originalMortgage,
-        mortgagePosition.summary.interestRate,
-        mortgagePosition.summary.amortizationYears,
-        Math.max(0, mortgagePosition.summary.monthsElapsed - 1)
-      )
+    ? mortgagePosition.mode === 'refinance'
+      ? calculatePreviousBalanceFromCurrentBalance(
+          mortgagePosition.summary.primaryRemainingBalance,
+          mortgagePosition.summary.interestRate,
+          mortgagePosition.summary.amortizationYears
+        )
+      : calculateRemainingBalance(
+          mortgagePosition.summary.originalMortgage,
+          mortgagePosition.summary.interestRate,
+          mortgagePosition.summary.amortizationYears,
+          Math.max(0, mortgagePosition.summary.monthsElapsed - 1)
+        )
     : null;
   const monthlyMortgagePaydown =
     previousMortgageBalance !== null && mortgagePosition
@@ -319,8 +379,8 @@ export default function ResultsPage() {
         mortgagePosition.helocBalance
       : null;
   const previousEstimatedValue =
-    monthOverMonthValuePercent !== null
-      ? result.estimatedCurrentValue / (1 + monthOverMonthValuePercent / 100)
+    currentTrendMetric !== null && previousTrendMetric !== null && currentTrendMetric > 0
+      ? result.estimatedCurrentValue * (previousTrendMetric / currentTrendMetric)
       : null;
   const previousNetEquity =
     previousEstimatedValue !== null && previousTotalDebt !== null
@@ -331,27 +391,25 @@ export default function ResultsPage() {
       ? mortgagePosition.netEquity - previousNetEquity
       : null;
   const originalAssumptions: EditableMortgageAssumptions | null = propertyData
-    ? {
-        interestRate: propertyData.mortgageAssumptions.interestRate,
-        amortization: propertyData.mortgageAssumptions.amortization,
-        downPayment: propertyData.mortgageAssumptions.downPayment,
-        secondaryMortgageBalance: propertyData.mortgageAssumptions.secondaryMortgageBalance ?? 0,
-        helocBalance: propertyData.mortgageAssumptions.helocBalance ?? 0,
-      }
+    ? buildEditableMortgageAssumptions(propertyData)
     : null;
   const refinanceRate = 5.25;
   const remainingAmortizationYears =
-    mortgagePosition && editableAssumptions
-      ? Math.max(
-          1,
-          (editableAssumptions.amortization * 12 - mortgagePosition.summary.monthsElapsed) / 12
-        )
+    mortgagePosition
+      ? mortgagePosition.mode === 'refinance'
+        ? mortgagePosition.summary.amortizationYears
+        : Math.max(
+            1,
+            (mortgagePosition.summary.amortizationYears * 12 -
+              mortgagePosition.summary.monthsElapsed) /
+              12
+          )
       : null;
   const currentEstimatedDebtPayment =
-    mortgagePosition && editableAssumptions && remainingAmortizationYears !== null
+    mortgagePosition && remainingAmortizationYears !== null
       ? calculateMonthlyPayment(
           mortgagePosition.totalOutstandingDebt,
-          editableAssumptions.interestRate,
+          mortgagePosition.summary.interestRate,
           remainingAmortizationYears
         )
       : null;
@@ -468,6 +526,9 @@ export default function ResultsPage() {
             refinanceRate={refinanceRate}
             refinancePayment={refinancePayment}
             refinanceDelta={refinanceDelta}
+            accessedEquitySincePurchase={
+              mortgagePosition?.summary.accessedEquitySincePurchase ?? null
+            }
           />
         </motion.section>
 
@@ -487,6 +548,11 @@ export default function ResultsPage() {
                 downPayment: 0,
                 secondaryMortgageBalance: 0,
                 helocBalance: 0,
+                hasRefinanced: false,
+                currentMortgageBalance: 0,
+                currentInterestRate: 0,
+                currentAmortization: 25,
+                refinanceYear: new Date().getFullYear(),
               }
             }
             originalValues={
@@ -496,15 +562,26 @@ export default function ResultsPage() {
                 downPayment: 0,
                 secondaryMortgageBalance: 0,
                 helocBalance: 0,
+                hasRefinanced: false,
+                currentMortgageBalance: 0,
+                currentInterestRate: 0,
+                currentAmortization: 25,
+                refinanceYear: new Date().getFullYear(),
               }
             }
             summary={{
+              mode: mortgagePosition?.summary.mode ?? 'original',
               originalMortgage: mortgagePosition?.summary.originalMortgage ?? null,
-              primaryRemainingBalance: mortgagePosition?.summary.remainingBalance ?? null,
+              primaryRemainingBalance:
+                mortgagePosition?.summary.primaryRemainingBalance ?? null,
               totalOutstandingDebt: mortgagePosition?.totalOutstandingDebt ?? null,
               principalPaid: mortgagePosition?.summary.principalPaidToDate ?? null,
               interestPaid: mortgagePosition?.summary.interestPaidToDate ?? null,
               monthlyPayment: mortgagePosition?.summary.monthlyPayment ?? null,
+              accessedEquitySincePurchase:
+                mortgagePosition?.summary.accessedEquitySincePurchase ?? null,
+              refinanceYear: mortgagePosition?.summary.refinanceYear ?? null,
+              currentEquity: mortgagePosition?.netEquity ?? null,
             }}
             onChange={(values) => setEditableAssumptions(values)}
             onReset={() => {

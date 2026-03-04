@@ -22,7 +22,7 @@ export function HpiTrend({
       purchaseDate={purchaseDate}
       purchaseHPI={purchaseHpi}
       currentHPI={currentHpi}
-      title="Market trend (HPI)"
+      title="Market trend"
       description="Tracks benchmark price movement in your area for your home type."
       tooltipContent="Tracks benchmark price movement in your area for your home type."
       height={320}

@@ -38,6 +38,7 @@ MARKET_WATCH_PAGE_TYPE_MAP = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--workspace-id", required=True)
     parser.add_argument("--hpi-dir", type=Path, default=DEFAULT_HPI_DIR)
     parser.add_argument("--market-watch-dir", type=Path, default=DEFAULT_MARKET_WATCH_DIR)
     parser.add_argument("--historic-pdf", type=Path, default=DEFAULT_HISTORIC_PDF)
@@ -172,6 +173,7 @@ def resolve_area(name: str, area_lookup: dict[str, str], area_by_id: dict[str, d
 
 def extract_hpi_rows(
     pdf_path: Path,
+    workspace_id: str,
     area_lookup: dict[str, str],
     area_by_id: dict[str, dict],
     property_type_by_name: dict[str, str],
@@ -222,6 +224,7 @@ def extract_hpi_rows(
                 continue
             rows.append(
                 {
+                    "workspace_id": workspace_id,
                     "period": period,
                     "area_id": resolved,
                     "property_type_id": property_type_id,
@@ -303,6 +306,7 @@ def parse_market_watch_property_page(
 
 def extract_market_watch_rows(
     pdf_path: Path,
+    workspace_id: str,
     area_lookup: dict[str, str],
     area_by_id: dict[str, dict],
     property_type_by_name: dict[str, str],
@@ -368,6 +372,7 @@ def extract_market_watch_rows(
         active_listings = record["active_listings"] or None
         rows.append(
             {
+                "workspace_id": workspace_id,
                 "period": record["period"],
                 "area_id": record["area_id"],
                 "property_type_id": record["property_type_id"],
@@ -389,7 +394,7 @@ def extract_market_watch_rows(
     return rows
 
 
-def extract_historic_rows(pdf_path: Path) -> list[dict]:
+def extract_historic_rows(pdf_path: Path, workspace_id: str) -> list[dict]:
     text_chunks = []
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
@@ -408,6 +413,7 @@ def extract_historic_rows(pdf_path: Path) -> list[dict]:
         seen.add(year)
         rows.append(
             {
+                "workspace_id": workspace_id,
                 "report_year": year,
                 "sales": parse_int(sales_str),
                 "avg_price": parse_decimal(price_str),
@@ -430,10 +436,10 @@ class SupabaseRestClient:
         }
         self.batch_size = batch_size
 
-    def delete_all(self, table: str, filter_column: str) -> None:
+    def delete_all(self, table: str, filter_column: str, filter_value: str) -> None:
         response = requests.delete(
             f"{self.base_url}/rest/v1/{table}",
-            params={filter_column: "not.is.null"},
+            params={filter_column: f"eq.{filter_value}"},
             headers={**self.headers, "Prefer": "return=minimal"},
             timeout=120,
         )
@@ -509,18 +515,30 @@ def main() -> None:
     for index, pdf_path in enumerate(hpi_files, start=1):
         print(f"[HPI {index}/{len(hpi_files)}] {pdf_path.name}", flush=True)
         hpi_rows.extend(
-            extract_hpi_rows(pdf_path, area_lookup, area_by_id, property_type_by_name)
+            extract_hpi_rows(
+                pdf_path,
+                args.workspace_id,
+                area_lookup,
+                area_by_id,
+                property_type_by_name,
+            )
         )
 
     market_watch_rows = []
     for index, pdf_path in enumerate(market_watch_files, start=1):
         print(f"[Market Watch {index}/{len(market_watch_files)}] {pdf_path.name}", flush=True)
         market_watch_rows.extend(
-            extract_market_watch_rows(pdf_path, area_lookup, area_by_id, property_type_by_name)
+            extract_market_watch_rows(
+                pdf_path,
+                args.workspace_id,
+                area_lookup,
+                area_by_id,
+                property_type_by_name,
+            )
         )
 
     print("[Historic] Parsing annual PDF", flush=True)
-    historic_rows = extract_historic_rows(args.historic_pdf)
+    historic_rows = extract_historic_rows(args.historic_pdf, args.workspace_id)
 
     raw_hpi_count = len(hpi_rows)
     raw_market_watch_count = len(market_watch_rows)
@@ -548,16 +566,20 @@ def main() -> None:
     base_url, service_key = load_env()
     client = SupabaseRestClient(base_url, service_key, args.batch_size)
     print("Clearing existing rows...", flush=True)
-    client.delete_all("market_hpi", "period")
-    client.delete_all("market_watch_monthly", "period")
-    client.delete_all("trreb_historic_annual", "report_year")
+    client.delete_all("market_hpi", "workspace_id", args.workspace_id)
+    client.delete_all("market_watch_monthly", "workspace_id", args.workspace_id)
+    client.delete_all("trreb_historic_annual", "workspace_id", args.workspace_id)
 
     print("Uploading market_hpi...", flush=True)
-    client.upsert("market_hpi", hpi_rows, "period,area_id,property_type_id")
+    client.upsert("market_hpi", hpi_rows, "workspace_id,period,area_id,property_type_id")
     print("Uploading market_watch_monthly...", flush=True)
-    client.upsert("market_watch_monthly", market_watch_rows, "period,area_id,property_type_id")
+    client.upsert(
+        "market_watch_monthly",
+        market_watch_rows,
+        "workspace_id,period,area_id,property_type_id",
+    )
     print("Uploading trreb_historic_annual...", flush=True)
-    client.upsert("trreb_historic_annual", historic_rows, "report_year")
+    client.upsert("trreb_historic_annual", historic_rows, "workspace_id,report_year")
     print("Import complete.", flush=True)
 
 

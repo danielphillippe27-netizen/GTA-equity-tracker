@@ -36,8 +36,10 @@ export default function EstimatePage() {
       try {
         const pendingEstimate = getPendingEstimate();
         const basePayload = pendingEstimate?.propertyData;
+        const workspaceSlug = pendingEstimate?.workspaceSlug;
 
         if (
+          !workspaceSlug ||
           !basePayload?.region ||
           !basePayload.propertyType ||
           !basePayload.purchaseYear ||
@@ -52,6 +54,7 @@ export default function EstimatePage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            workspaceSlug,
             region: basePayload.region,
             propertyType: basePayload.propertyType,
             purchaseYear: basePayload.purchaseYear,
@@ -98,21 +101,6 @@ export default function EstimatePage() {
             `estimate_${estimateId}`,
             JSON.stringify(responseData.result)
           );
-        }
-
-        const subscribeResponse = await fetch('/api/subscribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: pendingEstimate?.email || '',
-            name: pendingEstimate?.name || '',
-            propertyData,
-            estimateId,
-          }),
-        });
-
-        if (!subscribeResponse.ok) {
-          console.error('Failed to sync subscriber record');
         }
 
         router.replace(`/results/${estimateId}`);

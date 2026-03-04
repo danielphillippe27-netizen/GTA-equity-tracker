@@ -1,4 +1,5 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createBrowserClient } from '@supabase/ssr';
+import { SupabaseClient } from '@supabase/supabase-js';
 
 // Browser client - uses anon key, safe for client-side
 export const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -12,15 +13,9 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 // Note: We use a generic client here. For production, run `supabase gen types`
 // to generate accurate types from your actual database schema.
-export const supabase: SupabaseClient = createClient(
+export const supabase: SupabaseClient = createBrowserClient(
   supabaseUrl || 'https://placeholder.supabase.co',
-  supabaseAnonKey || 'placeholder-key',
-  {
-    auth: {
-      persistSession: true, // Enable session persistence for auth
-      autoRefreshToken: true,
-    },
-  }
+  supabaseAnonKey || 'placeholder-key'
 );
 
 // Helper to check if Supabase is configured

@@ -43,7 +43,7 @@ function CustomTooltip({ active, payload, label }: {
           {monthName} {year}
         </p>
         <p className="text-sm font-semibold text-foreground">
-          HPI: {payload[0].value.toFixed(1)}
+          Index: {payload[0].value.toFixed(1)}
         </p>
       </div>
     );
@@ -57,8 +57,8 @@ export function HPITrendChart({
   purchaseHPI,
   currentHPI,
   className,
-  title = 'HPI Trend',
-  description = 'Home Price Index from your purchase date to today',
+  title = 'Market trend',
+  description = 'Market index from your purchase date to today',
   tooltipContent,
   height = 256,
 }: HPITrendChartProps) {

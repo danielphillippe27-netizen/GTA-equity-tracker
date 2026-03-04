@@ -105,12 +105,6 @@ export function ClientEquityHero({
             <p className="text-3xl font-bold">
               <GradientText>{formatPrimaryValue(netEquity)}</GradientText>
             </p>
-            {monthlyEquityChange !== null ? (
-              <TrendLine tone={monthlyEquityChange >= 0 ? 'positive' : 'negative'}>
-                {monthlyEquityChange >= 0 ? '+' : '-'}
-                {formatCurrency(Math.abs(monthlyEquityChange))} vs last month
-              </TrendLine>
-            ) : null}
           </div>
         </div>
       </div>
