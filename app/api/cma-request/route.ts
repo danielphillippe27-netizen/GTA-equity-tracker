@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
       sessionId,
       name,
       email,
+      address,
       phone,
       preferredContactMethod,
       notes,
@@ -103,6 +104,7 @@ export async function POST(request: NextRequest) {
     const notificationResult = await sendCmaRequestNotification({
       name: name.trim(),
       email: email.trim().toLowerCase(),
+      address: typeof address === 'string' ? address.trim() || null : null,
       phone: phone?.trim() || null,
       estimateId: estimateId || null,
       preferredContactMethod: preferredContactMethod || 'email',

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
 import { useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
@@ -14,6 +15,7 @@ import {
 } from '@/components/report';
 import { FreeEvalCTA } from '@/components/results';
 import { GlowButton } from '@/components/shared';
+import { ContactTeamModal } from '@/app/evaluation/request/ContactTeamModal';
 import { formatCurrency } from '@/lib/constants';
 import { CurrentMarketStats, HPIEstimateResult } from '@/lib/estimation/hpi';
 import {
@@ -30,6 +32,10 @@ import {
   calculateRemainingBalance,
   calculateNetEquity,
 } from '@/lib/calculation/mortgage-calculator';
+import {
+  applyRenovationValueAdd,
+  resolveRenovationValueAdd,
+} from '@/lib/renovation-adjustment';
 
 interface BridgeEstimateResult extends HPIEstimateResult {
   dataEra?: 'historic' | 'hpi';
@@ -45,6 +51,7 @@ interface BridgeEstimateResult extends HPIEstimateResult {
 interface ApiHPIResult {
   estimateId: string;
   result: BridgeEstimateResult;
+  propertyData?: EstimatePropertyData | null;
 }
 
 interface EditableMortgageAssumptions {
@@ -53,6 +60,7 @@ interface EditableMortgageAssumptions {
   downPayment: number;
   secondaryMortgageBalance: number;
   helocBalance: number;
+  renovationValueAdd: number;
   hasRefinanced: boolean;
   currentMortgageBalance: number;
   currentInterestRate: number;
@@ -79,12 +87,30 @@ function formatPeriodLabel(period: string) {
   });
 }
 
+function toMonthIndex(period: string): number | null {
+  const [year, month] = period.split('-');
+  const numericYear = Number(year);
+  const numericMonth = Number(month);
+
+  if (
+    !Number.isFinite(numericYear) ||
+    !Number.isFinite(numericMonth) ||
+    numericMonth < 1 ||
+    numericMonth > 12
+  ) {
+    return null;
+  }
+
+  return numericYear * 12 + numericMonth;
+}
+
 function calculateRemainingAmortizationYears(totalAmortizationYears: number, monthsElapsed: number) {
   return Math.max(1, Math.ceil((totalAmortizationYears * 12 - monthsElapsed) / 12));
 }
 
 function buildEditableMortgageAssumptions(
-  propertyData: EstimatePropertyData
+  propertyData: EstimatePropertyData,
+  modelEstimatedCurrentValue: number | null
 ): EditableMortgageAssumptions {
   const baseSummary = calculateMortgageSummary({
     purchasePrice: propertyData.purchasePrice,
@@ -113,7 +139,42 @@ function buildEditableMortgageAssumptions(
         propertyData.mortgageAssumptions.amortization,
         baseSummary.monthsElapsed
       ),
+    renovationValueAdd: resolveRenovationValueAdd(propertyData, modelEstimatedCurrentValue),
     refinanceYear: propertyData.mortgageAssumptions.refinanceYear ?? new Date().getFullYear(),
+  };
+}
+
+function mergePropertyDataWithEditableAssumptions(
+  propertyData: EstimatePropertyData,
+  editableAssumptions: EditableMortgageAssumptions,
+  modelEstimatedCurrentValue: number,
+  netEquity: number | null
+): EstimatePropertyData {
+  const adjustedEstimatedCurrentValue = applyRenovationValueAdd(
+    modelEstimatedCurrentValue,
+    editableAssumptions.renovationValueAdd
+  );
+
+  return {
+    ...propertyData,
+    modelEstimatedCurrentValue,
+    estimatedCurrentValue: adjustedEstimatedCurrentValue,
+    renovationValueAdd: editableAssumptions.renovationValueAdd,
+    netEquity: netEquity ?? propertyData.netEquity,
+    mortgageAssumptions: {
+      ...propertyData.mortgageAssumptions,
+      interestRate: editableAssumptions.interestRate,
+      amortization: editableAssumptions.amortization,
+      downPayment: editableAssumptions.downPayment,
+      secondaryMortgageBalance: editableAssumptions.secondaryMortgageBalance,
+      helocBalance: editableAssumptions.helocBalance,
+      hasRefinanced: editableAssumptions.hasRefinanced,
+      currentMortgageBalance: editableAssumptions.currentMortgageBalance,
+      currentInterestRate: editableAssumptions.currentInterestRate,
+      currentAmortization: editableAssumptions.currentAmortization,
+      refinanceYear: editableAssumptions.refinanceYear,
+      renovationValueAdd: editableAssumptions.renovationValueAdd,
+    },
   };
 }
 
@@ -165,6 +226,8 @@ export default function ResultsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const hasFetchedRef = useRef(false);
+  const syncTimeoutRef = useRef<number | null>(null);
+  const lastSyncedPayloadRef = useRef<string>('');
 
   useEffect(() => {
     if (hasFetchedRef.current) {
@@ -217,6 +280,12 @@ export default function ResultsPage() {
 
         const data: ApiHPIResult = await estimateResponse.json();
         setResult(data.result);
+        if (data.propertyData && latestPropertyData?.estimateId !== estimateId) {
+          setPropertyData({
+            ...data.propertyData,
+            estimateId,
+          });
+        }
       } catch {
         if (!hasLocalResult) {
           setError('Unable to load your estimate. Please try again.');
@@ -230,7 +299,7 @@ export default function ResultsPage() {
   }, [estimateId]);
 
   useEffect(() => {
-    if (!propertyData) {
+    if (!propertyData || !result) {
       return;
     }
 
@@ -239,35 +308,24 @@ export default function ResultsPage() {
         return current;
       }
 
-      return buildEditableMortgageAssumptions(propertyData);
+      return buildEditableMortgageAssumptions(
+        propertyData,
+        result.estimatedCurrentValue
+      );
     });
-  }, [propertyData]);
+  }, [propertyData, result]);
 
-  useEffect(() => {
-    if (!propertyData || !editableAssumptions) {
-      return;
-    }
-
-    setLatestPropertyData({
-      ...propertyData,
-      mortgageAssumptions: {
-        ...propertyData.mortgageAssumptions,
-        interestRate: editableAssumptions.interestRate,
-        amortization: editableAssumptions.amortization,
-        downPayment: editableAssumptions.downPayment,
-        secondaryMortgageBalance: editableAssumptions.secondaryMortgageBalance,
-        helocBalance: editableAssumptions.helocBalance,
-        hasRefinanced: editableAssumptions.hasRefinanced,
-        currentMortgageBalance: editableAssumptions.currentMortgageBalance,
-        currentInterestRate: editableAssumptions.currentInterestRate,
-        currentAmortization: editableAssumptions.currentAmortization,
-        refinanceYear: editableAssumptions.refinanceYear,
-      },
-    });
-  }, [editableAssumptions, propertyData]);
+  const renovationValueAdd = Math.max(0, editableAssumptions?.renovationValueAdd ?? 0);
+  const adjustedEstimatedCurrentValue =
+    result ? applyRenovationValueAdd(result.estimatedCurrentValue, renovationValueAdd) : null;
 
   const mortgagePosition = useMemo(() => {
-    if (!propertyData || !result || !editableAssumptions) {
+    if (
+      !propertyData ||
+      !result ||
+      !editableAssumptions ||
+      adjustedEstimatedCurrentValue === null
+    ) {
       return null;
     }
 
@@ -291,9 +349,80 @@ export default function ResultsPage() {
 
     return {
       ...position,
-      netEquity: calculateNetEquity(result.estimatedCurrentValue, position.totalOutstandingDebt),
+      netEquity: calculateNetEquity(
+        adjustedEstimatedCurrentValue,
+        position.totalOutstandingDebt
+      ),
     };
-  }, [editableAssumptions, propertyData, result]);
+  }, [adjustedEstimatedCurrentValue, editableAssumptions, propertyData, result]);
+
+  const mergedPropertyData = useMemo(() => {
+    if (!propertyData || !editableAssumptions || !result) {
+      return null;
+    }
+
+    return mergePropertyDataWithEditableAssumptions(
+      propertyData,
+      editableAssumptions,
+      result.estimatedCurrentValue,
+      mortgagePosition?.netEquity ?? null
+    );
+  }, [editableAssumptions, mortgagePosition?.netEquity, propertyData, result]);
+
+  useEffect(() => {
+    if (!mergedPropertyData) {
+      return;
+    }
+
+    setLatestPropertyData(mergedPropertyData);
+  }, [mergedPropertyData]);
+
+  useEffect(() => {
+    if (!mergedPropertyData) {
+      return;
+    }
+
+    const payload = JSON.stringify({
+      estimateId,
+      propertyData: mergedPropertyData,
+    });
+
+    if (payload === lastSyncedPayloadRef.current) {
+      return;
+    }
+
+    if (syncTimeoutRef.current !== null) {
+      window.clearTimeout(syncTimeoutRef.current);
+    }
+
+    syncTimeoutRef.current = window.setTimeout(() => {
+      void fetch('/api/estimate/preferences', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+      })
+        .then((response) => {
+          if (response.ok) {
+            lastSyncedPayloadRef.current = payload;
+            return;
+          }
+
+          console.error(
+            '[Results] Failed to persist property data:',
+            response.status
+          );
+        })
+        .catch((persistError) => {
+          console.error('[Results] Failed to persist property data:', persistError);
+        });
+    }, 500);
+
+    return () => {
+      if (syncTimeoutRef.current !== null) {
+        window.clearTimeout(syncTimeoutRef.current);
+      }
+    };
+  }, [estimateId, mergedPropertyData]);
 
   if (loading) {
     return (
@@ -352,8 +481,17 @@ export default function ResultsPage() {
     currentTrendPoint?.benchmarkPrice ?? currentTrendPoint?.hpiIndex ?? null;
   const previousTrendMetric =
     previousTrendPoint?.benchmarkPrice ?? previousTrendPoint?.hpiIndex ?? null;
-  const monthOverMonthValuePercent =
-    percentChange(currentTrendMetric, previousTrendMetric);
+  const currentTrendMonthIndex =
+    currentTrendPoint ? toMonthIndex(currentTrendPoint.reportMonth) : null;
+  const previousTrendMonthIndex =
+    previousTrendPoint ? toMonthIndex(previousTrendPoint.reportMonth) : null;
+  const hasConsecutiveMonthlyTrend =
+    currentTrendMonthIndex !== null &&
+    previousTrendMonthIndex !== null &&
+    currentTrendMonthIndex - previousTrendMonthIndex === 1;
+  const monthOverMonthValuePercent = hasConsecutiveMonthlyTrend
+    ? percentChange(currentTrendMetric, previousTrendMetric)
+    : null;
   const previousMortgageBalance = mortgagePosition
     ? mortgagePosition.mode === 'refinance'
       ? calculatePreviousBalanceFromCurrentBalance(
@@ -372,26 +510,11 @@ export default function ResultsPage() {
     previousMortgageBalance !== null && mortgagePosition
       ? previousMortgageBalance - mortgagePosition.summary.remainingBalance
       : null;
-  const previousTotalDebt =
-    previousMortgageBalance !== null && mortgagePosition
-      ? previousMortgageBalance +
-        mortgagePosition.secondaryMortgageBalance +
-        mortgagePosition.helocBalance
-      : null;
-  const previousEstimatedValue =
-    currentTrendMetric !== null && previousTrendMetric !== null && currentTrendMetric > 0
-      ? result.estimatedCurrentValue * (previousTrendMetric / currentTrendMetric)
-      : null;
-  const previousNetEquity =
-    previousEstimatedValue !== null && previousTotalDebt !== null
-      ? calculateNetEquity(previousEstimatedValue, previousTotalDebt)
-      : null;
-  const monthlyEquityChange =
-    previousNetEquity !== null && mortgagePosition
-      ? mortgagePosition.netEquity - previousNetEquity
-      : null;
   const originalAssumptions: EditableMortgageAssumptions | null = propertyData
-    ? buildEditableMortgageAssumptions(propertyData)
+    ? buildEditableMortgageAssumptions(
+        propertyData,
+        result.estimatedCurrentValue
+      )
     : null;
   const refinanceRate = 5.25;
   const remainingAmortizationYears =
@@ -429,7 +552,7 @@ export default function ResultsPage() {
     purchaseLabel,
     region: result.input.region,
     propertyType: result.input.propertyType,
-    estimatedValue: result.estimatedCurrentValue,
+    estimatedValue: adjustedEstimatedCurrentValue ?? result.estimatedCurrentValue,
     marketChangePercent,
     netEquity: mortgagePosition?.netEquity ?? null,
     mortgageAvailable: Boolean(mortgagePosition),
@@ -444,13 +567,19 @@ export default function ResultsPage() {
       <header className="sticky top-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-sm">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
           <Link href="/" className="text-lg font-semibold text-foreground">
-            GTA Equity Tracker
+            Equity Tracker
           </Link>
-          <Link href={`/evaluation/request?estimateId=${estimateId}`}>
-            <GlowButton size="sm">
-              Request Free Home Evaluation
-            </GlowButton>
-          </Link>
+          <div className="flex items-center gap-3">
+            <ContactTeamModal
+              triggerLabel="Real Estate Questions?"
+              triggerClassName="inline-flex items-center justify-center rounded-full border border-white/14 bg-transparent px-5 py-2.5 text-sm font-medium text-white transition-colors hover:border-accent-cyan/60 hover:text-accent-cyan"
+            />
+            <Link href={`/evaluation/request?estimateId=${estimateId}`}>
+              <GlowButton size="sm">
+                Request Free Home Evaluation
+              </GlowButton>
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -467,12 +596,13 @@ export default function ResultsPage() {
               neighborhood={propertyData?.neighborhood ?? null}
               propertyType={result.input.propertyType}
               purchaseLabel={purchaseLabel}
-              estimatedValue={result.estimatedCurrentValue}
-              mortgageBalance={mortgagePosition?.totalOutstandingDebt ?? null}
+              estimatedValue={adjustedEstimatedCurrentValue ?? result.estimatedCurrentValue}
+              principalPaidSincePurchase={
+                mortgagePosition?.originalSummary.principalPaidToDate ?? null
+              }
               netEquity={mortgagePosition?.netEquity ?? null}
               monthOverMonthValuePercent={monthOverMonthValuePercent}
               monthlyMortgagePaydown={monthlyMortgagePaydown}
-              monthlyEquityChange={monthlyEquityChange}
               interpretation={interpretation}
             />
 
@@ -519,7 +649,7 @@ export default function ResultsPage() {
           transition={{ duration: 0.5, delay: 0.1 }}
         >
           <EquitySnapshot
-            estimatedValue={result.estimatedCurrentValue}
+            estimatedValue={adjustedEstimatedCurrentValue ?? result.estimatedCurrentValue}
             mortgageBalance={mortgagePosition?.totalOutstandingDebt ?? null}
             netEquity={mortgagePosition?.netEquity ?? null}
             currentEstimatedPayment={currentEstimatedDebtPayment}
@@ -528,6 +658,17 @@ export default function ResultsPage() {
             refinanceDelta={refinanceDelta}
             accessedEquitySincePurchase={
               mortgagePosition?.summary.accessedEquitySincePurchase ?? null
+            }
+            renovationValueAdd={renovationValueAdd}
+            onRenovationValueAddChange={(value) =>
+              setEditableAssumptions((current) =>
+                current
+                  ? {
+                      ...current,
+                      renovationValueAdd: Math.max(0, Math.round(value)),
+                    }
+                  : current
+              )
             }
           />
         </motion.section>
@@ -548,6 +689,7 @@ export default function ResultsPage() {
                 downPayment: 0,
                 secondaryMortgageBalance: 0,
                 helocBalance: 0,
+                renovationValueAdd: 0,
                 hasRefinanced: false,
                 currentMortgageBalance: 0,
                 currentInterestRate: 0,
@@ -562,6 +704,7 @@ export default function ResultsPage() {
                 downPayment: 0,
                 secondaryMortgageBalance: 0,
                 helocBalance: 0,
+                renovationValueAdd: 0,
                 hasRefinanced: false,
                 currentMortgageBalance: 0,
                 currentInterestRate: 0,
@@ -590,6 +733,23 @@ export default function ResultsPage() {
               }
             }}
           />
+        </motion.section>
+
+        <motion.section
+          className="mb-8 flex justify-center"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.24 }}
+        >
+          <div className="relative h-10 w-48 opacity-80 sm:h-12 sm:w-56">
+            <Image
+              src="/REVEL Grey Logo.png"
+              alt="Revel Realty logo"
+              fill
+              className="object-contain"
+              sizes="224px"
+            />
+          </div>
         </motion.section>
 
         <footer className="mt-6 flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-border/70 bg-surface/50 px-4 py-3 text-center text-xs text-muted-foreground">

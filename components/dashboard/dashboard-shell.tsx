@@ -7,10 +7,12 @@ import {
   ChartColumn,
   CreditCard,
   Database,
+  FileText,
   Home,
   LogOut,
   Settings,
   Upload,
+  UserRoundPlus,
   Users,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth/AuthProvider';
@@ -25,9 +27,11 @@ const navigationItems: Array<{
 }> = [
   { href: '/dashboard', label: 'Dashboard', icon: Home },
   { href: '/clients', label: 'Clients', icon: Users },
+  { href: '/add-new', label: 'Add New', icon: UserRoundPlus },
   { href: '/analytics', label: 'Analytics', icon: ChartColumn },
   { href: '/data', label: 'Data', icon: Database },
   { href: '/imports', label: 'Imports', icon: Upload },
+  { href: '/templates', label: 'Templates', icon: FileText },
   { href: '/billing', label: 'Billing', icon: CreditCard },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];

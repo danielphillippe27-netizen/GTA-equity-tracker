@@ -20,6 +20,10 @@ interface EstimateResponse {
   };
 }
 
+interface SubscribeResponse {
+  error?: string;
+}
+
 export default function EstimatePage() {
   const router = useRouter();
   const hasStartedRef = useRef(false);
@@ -37,6 +41,8 @@ export default function EstimatePage() {
         const pendingEstimate = getPendingEstimate();
         const basePayload = pendingEstimate?.propertyData;
         const workspaceSlug = pendingEstimate?.workspaceSlug;
+        const contactName = pendingEstimate?.name?.trim() || '';
+        const contactEmail = pendingEstimate?.email?.trim().toLowerCase() || '';
 
         if (
           !workspaceSlug ||
@@ -88,6 +94,34 @@ export default function EstimatePage() {
             mortgageSummary.remainingBalance
           ),
         };
+
+        if (contactName && contactEmail) {
+          try {
+            const subscribeResponse = await fetch('/api/subscribe', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                email: contactEmail,
+                name: contactName,
+                estimateId,
+                workspaceSlug,
+                propertyData,
+              }),
+            });
+
+            if (!subscribeResponse.ok) {
+              const subscribeData = (await subscribeResponse.json().catch(() => null)) as
+                | SubscribeResponse
+                | null;
+              console.error(
+                'Estimate flow subscribe failed:',
+                subscribeData?.error || `HTTP ${subscribeResponse.status}`
+              );
+            }
+          } catch (subscribeError) {
+            console.error('Estimate flow subscribe request failed:', subscribeError);
+          }
+        }
 
         setLatestPropertyData(propertyData);
         setLatestEstimateResult({

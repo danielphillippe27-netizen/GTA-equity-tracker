@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { sendWelcomeEmail } from '@/lib/email/resend';
 
+interface SubscribeRequestBody {
+  email?: unknown;
+  name?: unknown;
+  propertyData?: unknown;
+  estimateId?: unknown;
+  workspaceId?: unknown;
+  workspaceSlug?: unknown;
+}
+
 function getClientDisplayName(name: string | null | undefined, email: string) {
   const trimmedName = name?.trim();
 
@@ -41,6 +50,58 @@ async function sendWelcomeEmailIfPossible({
   }).catch((err) => {
     console.error('Welcome email failed (non-blocking):', err);
   });
+}
+
+async function resolveWorkspaceContext({
+  supabase,
+  estimateId,
+  workspaceId,
+  workspaceSlug,
+}: {
+  supabase: ReturnType<typeof createServerClient>;
+  estimateId?: string | null;
+  workspaceId?: string | null;
+  workspaceSlug?: string | null;
+}) {
+  let resolvedWorkspaceId = workspaceId ?? null;
+  let resolvedEstimateId: string | null = null;
+
+  if (estimateId) {
+    const { data: estimate, error } = await supabase
+      .from('estimates')
+      .select('id, workspace_id')
+      .eq('id', estimateId)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (estimate?.id) {
+      resolvedEstimateId = estimate.id as string;
+      resolvedWorkspaceId =
+        (estimate.workspace_id as string | undefined | null) ?? resolvedWorkspaceId;
+    }
+  }
+
+  if (!resolvedWorkspaceId && workspaceSlug) {
+    const { data: workspace, error } = await supabase
+      .from('workspaces')
+      .select('id')
+      .eq('slug', workspaceSlug)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    resolvedWorkspaceId = (workspace?.id as string | undefined) ?? null;
+  }
+
+  return {
+    workspaceId: resolvedWorkspaceId,
+    estimateId: resolvedEstimateId,
+  };
 }
 
 async function syncAgentClientFromSubscriber({
@@ -180,9 +241,26 @@ async function unsubscribeSubscriber(id?: string | null, email?: string | null) 
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { email, name, propertyData, estimateId } = body;
-    const normalizedEmail = typeof email === 'string' ? email.toLowerCase().trim() : '';
+    const body = (await request.json()) as SubscribeRequestBody;
+    const normalizedEmail =
+      typeof body.email === 'string' ? body.email.toLowerCase().trim() : '';
+    const normalizedName = typeof body.name === 'string' ? body.name.trim() : null;
+    const normalizedEstimateId =
+      typeof body.estimateId === 'string' && body.estimateId.trim().length > 0
+        ? body.estimateId.trim()
+        : null;
+    const normalizedWorkspaceId =
+      typeof body.workspaceId === 'string' && body.workspaceId.trim().length > 0
+        ? body.workspaceId.trim()
+        : null;
+    const normalizedWorkspaceSlug =
+      typeof body.workspaceSlug === 'string' && body.workspaceSlug.trim().length > 0
+        ? body.workspaceSlug.trim()
+        : null;
+    const propertyData =
+      body.propertyData && typeof body.propertyData === 'object'
+        ? (body.propertyData as Record<string, unknown>)
+        : {};
 
     if (!normalizedEmail || !normalizedEmail.includes('@')) {
       return NextResponse.json(
@@ -192,29 +270,46 @@ export async function POST(request: NextRequest) {
     }
 
     const supabase = createServerClient();
-    let workspaceId: string | null = null;
-
-    if (estimateId) {
-      const { data: estimate } = await supabase
-        .from('estimates')
-        .select('workspace_id')
-        .eq('id', estimateId)
-        .maybeSingle();
-
-      workspaceId = (estimate?.workspace_id as string | undefined) ?? null;
-    }
+    const context = await resolveWorkspaceContext({
+      supabase,
+      estimateId: normalizedEstimateId,
+      workspaceId: normalizedWorkspaceId,
+      workspaceSlug: normalizedWorkspaceSlug,
+    });
+    let workspaceId = context.workspaceId;
+    const resolvedEstimateId = context.estimateId;
 
     // Check if email already exists
     let existingQuery = supabase
       .from('subscribers')
-      .select('id, unsubscribed_at')
-      .eq('email', normalizedEmail);
+      .select('id, unsubscribed_at, workspace_id')
+      .eq('email', normalizedEmail)
+      .limit(1);
 
     if (workspaceId) {
       existingQuery = existingQuery.eq('workspace_id', workspaceId);
     }
 
-    const { data: existing } = await existingQuery.maybeSingle();
+    const { data: existing, error: existingError } = await existingQuery.maybeSingle();
+    if (existingError) {
+      console.error('Error checking existing subscriber:', existingError);
+      return NextResponse.json(
+        { error: 'Failed to check existing subscription' },
+        { status: 500 }
+      );
+    }
+
+    if (!workspaceId) {
+      workspaceId = (existing?.workspace_id as string | null | undefined) ?? null;
+    }
+
+    if (!workspaceId) {
+      console.warn('[Subscribe] Missing workspace context. CRM sync may be skipped.', {
+        email: normalizedEmail,
+        estimateId: normalizedEstimateId,
+        workspaceSlug: normalizedWorkspaceSlug,
+      });
+    }
 
     if (existing) {
       // Reactivate if previously unsubscribed
@@ -225,9 +320,9 @@ export async function POST(request: NextRequest) {
             unsubscribed_at: null,
             monthly_reports: true,
             workspace_id: workspaceId,
-            property_data: propertyData || {},
-            estimate_id: estimateId,
-            name: name || null,
+            property_data: propertyData,
+            estimate_id: resolvedEstimateId,
+            name: normalizedName,
           })
           .eq('id', existing.id);
 
@@ -243,14 +338,14 @@ export async function POST(request: NextRequest) {
           subscriberId: existing.id,
           workspaceId,
           email: normalizedEmail,
-          name,
+          name: normalizedName,
           propertyData,
-          estimateId,
+          estimateId: resolvedEstimateId,
         });
 
         await sendWelcomeEmailIfPossible({
           email: normalizedEmail,
-          name,
+          name: normalizedName,
           propertyData,
           subscriberId: existing.id,
           workspaceId,
@@ -267,9 +362,9 @@ export async function POST(request: NextRequest) {
         .from('subscribers')
         .update({
           workspace_id: workspaceId,
-          name: name || null,
-          property_data: propertyData || {},
-          estimate_id: estimateId,
+          name: normalizedName,
+          property_data: propertyData,
+          estimate_id: resolvedEstimateId,
         })
         .eq('id', existing.id);
 
@@ -285,9 +380,9 @@ export async function POST(request: NextRequest) {
         subscriberId: existing.id,
         workspaceId,
         email: normalizedEmail,
-        name,
+        name: normalizedName,
         propertyData,
-        estimateId,
+        estimateId: resolvedEstimateId,
       });
 
       return NextResponse.json({
@@ -302,10 +397,10 @@ export async function POST(request: NextRequest) {
       .from('subscribers')
       .insert({
         email: normalizedEmail,
-        name: name || null,
+        name: normalizedName,
         workspace_id: workspaceId,
-        property_data: propertyData || {},
-        estimate_id: estimateId,
+        property_data: propertyData,
+        estimate_id: resolvedEstimateId,
       })
       .select('id')
       .single();
@@ -322,14 +417,14 @@ export async function POST(request: NextRequest) {
       subscriberId: subscriber.id,
       workspaceId,
       email: normalizedEmail,
-      name,
+      name: normalizedName,
       propertyData,
-      estimateId,
+      estimateId: resolvedEstimateId,
     });
 
     await sendWelcomeEmailIfPossible({
       email: normalizedEmail,
-      name,
+      name: normalizedName,
       propertyData,
       subscriberId: subscriber.id,
       workspaceId,

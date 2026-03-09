@@ -1,5 +1,10 @@
 import { Resend } from 'resend';
 import { createServerClient } from '@/lib/supabase/server';
+import type {
+  MonthlyReportTemplateSettings,
+  WorkspaceBrand,
+  WorkspaceSettings,
+} from '@/lib/workspaces';
 
 function readEnv(name: string): string | null {
   const value = process.env[name];
@@ -94,7 +99,8 @@ function buildPreciseEvaluationUrl(
   region: string,
   propertyType: string,
   subscriberId: string,
-  estimateId?: string | null
+  estimateId?: string | null,
+  brandName: string = 'The Phillippe Group'
 ): string {
   const recipient =
     readEnv('CMA_REQUEST_NOTIFY_EMAIL') ||
@@ -102,7 +108,7 @@ function buildPreciseEvaluationUrl(
     'info@equitytracker.ca';
   const subject = `Precise home evaluation request from ${titleCaseName(name)}`;
   const lines = [
-    'Hi The Phillippe Group,',
+    `Hi ${brandName},`,
     '',
     `I would like a precise home evaluation for my ${propertyType.toLowerCase()} property in ${region}.`,
     '',
@@ -169,6 +175,7 @@ interface SendMonthlyReportParams {
 interface SendCmaRequestNotificationParams {
   name: string;
   email: string;
+  address?: string | null;
   phone?: string | null;
   estimateId?: string | null;
   preferredContactMethod?: string | null;
@@ -212,6 +219,10 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
+function formatHtmlText(value: string): string {
+  return escapeHtml(value).replaceAll('\n', '<br />');
+}
+
 function formatMonth(period?: string | null): string | null {
   if (!period) {
     return null;
@@ -247,6 +258,295 @@ function buildDashboardUrl(estimateId?: string | null): string {
   const baseUrl = getAppBaseUrl();
   const targetPath = estimateId ? `/results/${estimateId}` : '/dashboard';
   return new URL(targetPath, baseUrl).toString();
+}
+
+function resolveAssetUrl(value?: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    return new URL(trimmed).toString();
+  } catch {
+    const path = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+    return new URL(path, getAppBaseUrl()).toString();
+  }
+}
+
+async function loadMonthlyReportBranding(workspaceId?: string | null) {
+  if (!workspaceId) {
+    return null;
+  }
+
+  try {
+    const supabase = createServerClient();
+    const { data, error } = await supabase
+      .from('workspaces')
+      .select('name, brand, settings')
+      .eq('id', workspaceId)
+      .maybeSingle();
+
+    if (error || !data) {
+      if (error) {
+        console.warn('[Resend] Failed to load workspace branding:', error.message);
+      }
+      return null;
+    }
+
+    const brand = (data.brand ?? null) as WorkspaceBrand | null;
+    const settings = (data.settings ?? null) as WorkspaceSettings | null;
+    const template = settings?.monthlyReportTemplate as MonthlyReportTemplateSettings | undefined;
+
+    return {
+      workspaceName: typeof data.name === 'string' ? data.name.trim() : '',
+      logoUrl: resolveAssetUrl(brand?.logoUrl),
+      brandName: template?.brandName?.trim() || null,
+      introText: template?.introText?.trim() || null,
+      ctaText: template?.ctaText?.trim() || null,
+      footerNote: template?.footerNote?.trim() || null,
+      bottomLogoLeftUrl: resolveAssetUrl(template?.bottomLogoLeftUrl),
+      bottomLogoUrl: resolveAssetUrl(template?.bottomLogoUrl),
+      bottomLogoRightUrl: resolveAssetUrl(template?.bottomLogoRightUrl),
+    };
+  } catch (error) {
+    console.warn('[Resend] Failed to load workspace branding:', error);
+    return null;
+  }
+}
+
+function renderBottomLogoRow(logoUrls: Array<string | null | undefined>) {
+  const safeLogoUrls = logoUrls.filter((value): value is string => Boolean(value));
+
+  if (!safeLogoUrls.length) {
+    return '';
+  }
+
+  const logoCells = safeLogoUrls
+    .map(
+      (logoUrl) => `
+        <td align="center" style="padding: 0 10px 0 10px;">
+          <img src="${escapeHtml(logoUrl)}" alt="Partner logo" style="display: block; max-width: 110px; max-height: 42px;" />
+        </td>
+      `
+    )
+    .join('');
+
+  return `
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 18px;">
+      <tr>
+        <td align="center">
+          <table cellpadding="0" cellspacing="0">
+            <tr>${logoCells}</tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  `;
+}
+
+interface MonthlyReportEmailContentParams {
+  to: string;
+  name: string;
+  subscriberId?: string;
+  workspaceId?: string | null;
+  estimateId?: string | null;
+  estimatedValue: number;
+  previousValue: number;
+  equityGained: number;
+  netEquity: number;
+  region: string;
+  propertyType: string;
+  reportMonth?: string | null;
+  previousReportMonth?: string | null;
+  averageSoldPrice?: number | null;
+  averageDaysOnMarket?: number | null;
+  monthsOfInventory?: number | null;
+  scopeAreaName?: string | null;
+  isFallback?: boolean;
+  subjectPrefix?: string;
+}
+
+async function buildMonthlyReportEmailContent({
+  to,
+  name,
+  subscriberId,
+  workspaceId,
+  estimateId,
+  estimatedValue,
+  previousValue,
+  equityGained,
+  netEquity,
+  region,
+  propertyType,
+  reportMonth,
+  previousReportMonth,
+  averageSoldPrice,
+  averageDaysOnMarket,
+  monthsOfInventory,
+  scopeAreaName,
+  isFallback,
+  subjectPrefix,
+}: MonthlyReportEmailContentParams) {
+  const firstName = titleCaseName(name.split(' ')[0] || 'there');
+  const unsubscribeUrl = buildUnsubscribeUrl(subscriberId, to);
+  const safePreviousValue = previousValue > 0 ? previousValue : estimatedValue;
+  const valueChange = estimatedValue - safePreviousValue;
+  const valueChangePercent = safePreviousValue > 0 ? (valueChange / safePreviousValue) * 100 : 0;
+  const isUp = valueChange >= 0;
+  const reportLabel = formatMonth(reportMonth);
+  const previousReportLabel = formatMonth(previousReportMonth);
+  const localityLabel = scopeAreaName || region;
+  const marketStatsHeading = `${localityLabel} Market Stats`;
+  const branding = await loadMonthlyReportBranding(workspaceId);
+  const brandName = branding?.brandName || branding?.workspaceName || 'The Phillippe Group';
+  const logoUrl = branding?.logoUrl || null;
+  const introText =
+    branding?.introText ||
+    'Here is your latest monthly home wealth snapshot, built from current GTA benchmark and market activity data.';
+  const topCtaText = branding?.ctaText || 'Request Precise Home Evaluation';
+  const footerNote =
+    branding?.footerNote || 'Updated monthly using TRREB benchmark and Market Watch data.';
+  const safeBrandName = escapeHtml(brandName);
+  const safeIntroText = formatHtmlText(introText);
+  const safeTopCtaText = escapeHtml(topCtaText);
+  const safeFooterNote = formatHtmlText(footerNote);
+  const safeLogoUrl = logoUrl ? escapeHtml(logoUrl) : null;
+  const dashboardUrl = await buildDashboardLoginUrl(to, estimateId);
+  const preciseEvaluationUrl = buildPreciseEvaluationUrl(
+    name,
+    to,
+    region,
+    propertyType,
+    subscriberId || 'template-preview',
+    estimateId,
+    brandName
+  );
+  const thisMonthAmount = `${isUp ? '+' : '-'}${formatCurrency(Math.abs(valueChange))}`;
+  const thisMonthPercent = `(${formatPercent(valueChangePercent)} vs last report)`;
+  const bottomLogoRow = renderBottomLogoRow([
+    branding?.bottomLogoLeftUrl,
+    branding?.bottomLogoUrl,
+    branding?.bottomLogoRightUrl,
+  ]);
+
+  return {
+    subject: `${subjectPrefix || ''}${firstName}, your home is now worth ${formatCurrency(estimatedValue)}`,
+    html: `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; background-color: #0B0F14; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #0B0F14; padding: 40px 20px;">
+    <tr>
+      <td align="center">
+        <table width="720" cellpadding="0" cellspacing="0" style="max-width: 720px;">
+          <tr>
+            <td style="padding-bottom: 30px;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="vertical-align: middle; padding-right: 16px;">
+                    ${safeLogoUrl ? `<img src="${safeLogoUrl}" alt="${safeBrandName} logo" style="display: block; max-width: 180px; max-height: 56px; margin: 0 0 14px;" />` : ''}
+                    <p style="margin: 0 0 4px; color: #8A94A6; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;">Brought to you by:</p>
+                    <h1 style="margin: 0; color: #F5F7FA; font-size: 24px; font-weight: 600;">${safeBrandName}</h1>
+                  </td>
+                  <td align="right" style="vertical-align: middle; width: 280px;">
+                    <a href="${preciseEvaluationUrl}" style="display: inline-block; background-color: transparent; color: #F5F7FA; text-decoration: none; font-size: 14px; font-weight: 600; border: 1px solid rgba(255,255,255,0.18); border-radius: 999px; padding: 13px 18px; text-align: center; white-space: nowrap;">
+                      ${safeTopCtaText}
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #11161C; border: 1px solid rgba(255,255,255,0.06); border-radius: 24px; padding: 40px 44px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);">
+              <p style="margin: 0 0 10px; color: #8A94A6; font-size: 13px; text-transform: uppercase; letter-spacing: 0.14em;">${reportLabel || 'Monthly wealth snapshot'}</p>
+              <h2 style="margin: 0 0 10px; color: #F5F7FA; font-size: 34px; line-height: 1.15; font-weight: 700;">
+                ${firstName}, your home is now worth
+              </h2>
+              <p style="margin: 0 0 10px; color: #F5F7FA; font-size: 56px; line-height: 1; font-weight: 700; letter-spacing: -0.03em;">
+                ${formatCurrency(estimatedValue)}
+              </p>
+              <p style="margin: 0 0 24px; color: #8A94A6; font-size: 14px;">
+                ${thisMonthPercent}${previousReportLabel ? `, since ${previousReportLabel}` : ''}
+              </p>
+              <p style="margin: 0 0 24px; color: #C8D1DC; font-size: 15px; line-height: 1.7;">
+                ${safeIntroText}
+              </p>
+
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 18px;">
+                <tr>
+                  ${renderMetricCard('Current Value', formatCurrency(estimatedValue), '#F5F7FA', 28)}
+                  ${renderMetricCard('Net Equity', formatCurrency(netEquity), '#F5F7FA', 28)}
+                </tr>
+                <tr>
+                  ${renderMetricCard('Since Purchase', formatCurrency(equityGained), '#2ED3B7')}
+                  ${renderMetricCard('This Month', thisMonthAmount, isUp ? '#2ED3B7' : '#FF8B90')}
+                </tr>
+              </table>
+
+              <div style="margin: 0 0 28px; padding: 22px; border-radius: 20px; background-color: #0D1318; border: 1px solid rgba(255,255,255,0.05);">
+                <p style="margin: 0 0 10px; color: #F5F7FA; font-size: 18px; font-weight: 600;">${marketStatsHeading}</p>
+                <table width="100%" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td style="padding: 0 0 12px; color: #8A94A6; font-size: 14px;">Average sold price</td>
+                    <td style="padding: 0 0 12px; color: #ffffff; font-size: 13px; text-align: right;">
+                      ${averageSoldPrice !== null && averageSoldPrice !== undefined ? formatCurrency(averageSoldPrice) : 'Not available'}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 0 0 12px; color: #8A94A6; font-size: 14px;">Days on market</td>
+                    <td style="padding: 0 0 12px; color: #ffffff; font-size: 13px; text-align: right;">
+                      ${averageDaysOnMarket !== null && averageDaysOnMarket !== undefined ? `${averageDaysOnMarket.toFixed(0)} days` : 'N/A'}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 0 0 12px; color: #8A94A6; font-size: 14px;">Inventory</td>
+                    <td style="padding: 0 0 12px; color: #ffffff; font-size: 13px; text-align: right;">
+                      ${monthsOfInventory !== null && monthsOfInventory !== undefined ? `${monthsOfInventory.toFixed(1)} months` : 'N/A'}
+                    </td>
+                  </tr>
+                </table>
+              </div>
+
+              <div style="text-align: center;">
+                <a href="${dashboardUrl}" style="display: block; width: 100%; box-sizing: border-box; background-color: #4DA3FF; color: #0B0F14; text-decoration: none; font-weight: 700; font-size: 18px; padding: 18px 26px; border-radius: 999px; text-align: center;">
+                  View Full Wealth Dashboard
+                </a>
+              </div>
+
+              <p style="margin: 22px 0 0; color: #8A94A6; font-size: 12px; line-height: 1.6; text-align: center;">
+                ${localityLabel}.${isFallback ? ' Market metrics use the next broader TRREB area where local monthly stats were unavailable.' : ''}
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding-top: 28px; text-align: center;">
+              ${bottomLogoRow}
+              <p style="margin: 0; color: #64748b; font-size: 12px; line-height: 1.6;">
+                ${safeFooterNote}
+              </p>
+              <p style="margin: 10px 0 0; color: #64748b; font-size: 12px;">
+                <a href="${unsubscribeUrl}" style="color: #94a3b8;">Unsubscribe</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+    `,
+  };
 }
 
 async function buildDashboardLoginUrl(
@@ -538,145 +838,39 @@ export async function sendMonthlyReport({
   scopeAreaName,
   isFallback,
 }: SendMonthlyReportParams) {
-  const firstName = titleCaseName(name.split(' ')[0] || 'there');
   const resend = getResendClient();
 
   if (!resend) {
     console.warn('[Resend] Skipping monthly report because RESEND_API_KEY is not configured.');
     return { success: false, error: 'RESEND_API_KEY is not configured' };
   }
-
-  const unsubscribeUrl = buildUnsubscribeUrl(subscriberId, to);
-  const safePreviousValue = previousValue > 0 ? previousValue : estimatedValue;
-  const valueChange = estimatedValue - safePreviousValue;
-  const valueChangePercent = safePreviousValue > 0 ? (valueChange / safePreviousValue) * 100 : 0;
-  const isUp = valueChange >= 0;
-  const reportLabel = formatMonth(reportMonth);
-  const previousReportLabel = formatMonth(previousReportMonth);
-  const localityLabel = scopeAreaName || region;
-  const marketStatsHeading = `${localityLabel} Market Stats`;
-  const dashboardUrl = await buildDashboardLoginUrl(to, estimateId);
-  const preciseEvaluationUrl = buildPreciseEvaluationUrl(
-    name,
+  const content = await buildMonthlyReportEmailContent({
     to,
+    name,
+    subscriberId,
+    workspaceId,
+    estimateId,
+    estimatedValue,
+    previousValue,
+    equityGained,
+    netEquity,
     region,
     propertyType,
-    subscriberId,
-    estimateId
-  );
-  const thisMonthAmount = `${isUp ? '+' : '-'}${formatCurrency(Math.abs(valueChange))}`;
-  const thisMonthPercent = `(${formatPercent(valueChangePercent)} vs last report)`;
+    reportMonth,
+    previousReportMonth,
+    averageSoldPrice,
+    averageDaysOnMarket,
+    monthsOfInventory,
+    scopeAreaName,
+    isFallback,
+  });
 
   try {
     const { data, error } = await sendWithSenderFallback(resend, {
       from: `GTA Equity Tracker <${FROM_EMAIL}>`,
       to: [to],
-      subject: `${firstName}, your home is now worth ${formatCurrency(estimatedValue)}`,
-      html: `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body style="margin: 0; padding: 0; background-color: #0B0F14; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #0B0F14; padding: 40px 20px;">
-    <tr>
-      <td align="center">
-        <table width="720" cellpadding="0" cellspacing="0" style="max-width: 720px;">
-          <tr>
-            <td style="padding-bottom: 30px;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="vertical-align: middle; padding-right: 16px;">
-                    <p style="margin: 0 0 4px; color: #8A94A6; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;">Brought to you by:</p>
-                    <h1 style="margin: 0; color: #F5F7FA; font-size: 24px; font-weight: 600;">The Phillippe Group</h1>
-                  </td>
-                  <td align="right" style="vertical-align: middle; width: 280px;">
-                    <a href="${preciseEvaluationUrl}" style="display: inline-block; background-color: transparent; color: #F5F7FA; text-decoration: none; font-size: 14px; font-weight: 600; border: 1px solid rgba(255,255,255,0.18); border-radius: 999px; padding: 13px 18px; text-align: center; white-space: nowrap;">
-                      Request Precise Home Evaluation
-                    </a>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          <tr>
-            <td style="background-color: #11161C; border: 1px solid rgba(255,255,255,0.06); border-radius: 24px; padding: 40px 44px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);">
-              <p style="margin: 0 0 10px; color: #8A94A6; font-size: 13px; text-transform: uppercase; letter-spacing: 0.14em;">${reportLabel || 'Monthly wealth snapshot'}</p>
-              <h2 style="margin: 0 0 10px; color: #F5F7FA; font-size: 34px; line-height: 1.15; font-weight: 700;">
-                ${firstName}, your home is now worth
-              </h2>
-              <p style="margin: 0 0 10px; color: #F5F7FA; font-size: 56px; line-height: 1; font-weight: 700; letter-spacing: -0.03em;">
-                ${formatCurrency(estimatedValue)}
-              </p>
-              <p style="margin: 0 0 24px; color: #8A94A6; font-size: 14px;">
-                ${thisMonthPercent}${previousReportLabel ? `, since ${previousReportLabel}` : ''}
-              </p>
-
-              <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 18px;">
-                <tr>
-                  ${renderMetricCard('Current Value', formatCurrency(estimatedValue), '#F5F7FA', 28)}
-                  ${renderMetricCard('Net Equity', formatCurrency(netEquity), '#F5F7FA', 28)}
-                </tr>
-                <tr>
-                  ${renderMetricCard('Since Purchase', formatCurrency(equityGained), '#2ED3B7')}
-                  ${renderMetricCard('This Month', thisMonthAmount, isUp ? '#2ED3B7' : '#FF8B90')}
-                </tr>
-              </table>
-
-              <div style="margin: 0 0 28px; padding: 22px; border-radius: 20px; background-color: #0D1318; border: 1px solid rgba(255,255,255,0.05);">
-                <p style="margin: 0 0 10px; color: #F5F7FA; font-size: 18px; font-weight: 600;">${marketStatsHeading}</p>
-                <table width="100%" cellpadding="0" cellspacing="0">
-                  <tr>
-                    <td style="padding: 0 0 12px; color: #8A94A6; font-size: 14px;">Average sold price</td>
-                    <td style="padding: 0 0 12px; color: #ffffff; font-size: 13px; text-align: right;">
-                      ${averageSoldPrice !== null && averageSoldPrice !== undefined ? formatCurrency(averageSoldPrice) : 'Not available'}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 0 0 12px; color: #8A94A6; font-size: 14px;">Days on market</td>
-                    <td style="padding: 0 0 12px; color: #ffffff; font-size: 13px; text-align: right;">
-                      ${averageDaysOnMarket !== null && averageDaysOnMarket !== undefined ? `${averageDaysOnMarket.toFixed(0)} days` : 'N/A'}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 0 0 12px; color: #8A94A6; font-size: 14px;">Inventory</td>
-                    <td style="padding: 0 0 12px; color: #ffffff; font-size: 13px; text-align: right;">
-                      ${monthsOfInventory !== null && monthsOfInventory !== undefined ? `${monthsOfInventory.toFixed(1)} months` : 'N/A'}
-                    </td>
-                  </tr>
-                </table>
-              </div>
-
-              <div style="text-align: center;">
-                <a href="${dashboardUrl}" style="display: block; width: 100%; box-sizing: border-box; background-color: #4DA3FF; color: #0B0F14; text-decoration: none; font-weight: 700; font-size: 18px; padding: 18px 26px; border-radius: 999px; text-align: center;">
-                  View Full Wealth Dashboard
-                </a>
-              </div>
-
-              <p style="margin: 22px 0 0; color: #8A94A6; font-size: 12px; line-height: 1.6; text-align: center;">
-                ${localityLabel}.${isFallback ? ' Market metrics use the next broader TRREB area where local monthly stats were unavailable.' : ''}
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding-top: 28px; text-align: center;">
-              <p style="margin: 0; color: #64748b; font-size: 12px; line-height: 1.6;">
-                Updated monthly using TRREB benchmark and Market Watch data.
-              </p>
-              <p style="margin: 10px 0 0; color: #64748b; font-size: 12px;">
-                <a href="${unsubscribeUrl}" style="color: #94a3b8;">Unsubscribe</a>
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-      `,
+      subject: content.subject,
+      html: content.html,
     });
 
     if (error) {
@@ -739,9 +933,66 @@ export async function sendMonthlyReport({
   }
 }
 
+export async function sendTestMonthlyReport({
+  to,
+  workspaceId,
+  name = 'Test',
+}: {
+  to: string;
+  workspaceId?: string | null;
+  name?: string;
+}) {
+  const resend = getResendClient();
+
+  if (!resend) {
+    console.warn('[Resend] Skipping test monthly report because RESEND_API_KEY is not configured.');
+    return { success: false, error: 'RESEND_API_KEY is not configured' };
+  }
+
+  const content = await buildMonthlyReportEmailContent({
+    to,
+    name,
+    workspaceId,
+    estimatedValue: 1494948,
+    previousValue: 1511911,
+    equityGained: 1244948,
+    netEquity: 1494948,
+    region: 'Clarington',
+    propertyType: 'Detached',
+    reportMonth: '2026-01-01',
+    previousReportMonth: '2025-12-01',
+    averageSoldPrice: 820132,
+    averageDaysOnMarket: 53,
+    monthsOfInventory: 4.3,
+    scopeAreaName: 'Clarington',
+    isFallback: false,
+    subjectPrefix: '[Test] ',
+  });
+
+  try {
+    const { data, error } = await sendWithSenderFallback(resend, {
+      from: `GTA Equity Tracker <${FROM_EMAIL}>`,
+      to: [to],
+      subject: content.subject,
+      html: content.html,
+    });
+
+    if (error) {
+      console.error('[Resend] Test monthly report error:', error);
+      return { success: false, error };
+    }
+
+    return { success: true, data };
+  } catch (error) {
+    console.error('[Resend] Test monthly report exception:', error);
+    return { success: false, error };
+  }
+}
+
 export async function sendCmaRequestNotification({
   name,
   email,
+  address,
   phone,
   estimateId,
   preferredContactMethod,
@@ -752,6 +1003,7 @@ export async function sendCmaRequestNotification({
   const recipient = getCmaRequestNotificationRecipient();
   const safeName = escapeHtml(name);
   const safeEmail = escapeHtml(email);
+  const safeAddress = escapeHtml(address || 'Not provided');
   const safePhone = escapeHtml(phone || 'Not provided');
   const safePreferredContact = escapeHtml(preferredContactMethod || 'email');
   const safeEstimateId = escapeHtml(estimateId || 'Not provided');
@@ -764,6 +1016,7 @@ export async function sendCmaRequestNotification({
   const lines = [
     `Name: ${name}`,
     `Email: ${email}`,
+    `Address: ${address || 'Not provided'}`,
     `Phone: ${phone || 'Not provided'}`,
     `Preferred contact: ${preferredContactMethod || 'email'}`,
     `Estimate ID: ${estimateId || 'Not provided'}`,
@@ -795,6 +1048,10 @@ export async function sendCmaRequestNotification({
       <tr>
         <td style="padding: 0 0 12px; color: #8A94A6; font-size: 14px;">Email</td>
         <td style="padding: 0 0 12px; color: #F5F7FA; font-size: 14px; text-align: right;">${safeEmail}</td>
+      </tr>
+      <tr>
+        <td style="padding: 0 0 12px; color: #8A94A6; font-size: 14px;">Address</td>
+        <td style="padding: 0 0 12px; color: #F5F7FA; font-size: 14px; text-align: right;">${safeAddress}</td>
       </tr>
       <tr>
         <td style="padding: 0 0 12px; color: #8A94A6; font-size: 14px;">Phone</td>
@@ -849,6 +1106,7 @@ export async function sendCmaRequestNotification({
       metadata: {
         estimateId,
         requestEmail: email,
+        address,
       },
     });
     return { success: true, data };
@@ -862,6 +1120,7 @@ export async function sendCmaRequestNotification({
       metadata: {
         estimateId,
         requestEmail: email,
+        address,
         reason: error instanceof Error ? error.message : String(error),
       },
     });

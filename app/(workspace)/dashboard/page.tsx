@@ -27,19 +27,19 @@ export default function DashboardPage() {
   const { dashboard } = useDashboard();
   const [copyLabel, setCopyLabel] = useState('Copy Link');
 
+  const propertyData = dashboard?.profile.property_data ?? {};
+  const marketStats = dashboard?.homeowner?.marketStats ?? null;
+  const firstName = dashboard?.profile.name?.split(' ')[0] || 'there';
+  const latestImportDate =
+    dashboard?.importJobs?.[0]?.finished_at ||
+    dashboard?.importJobs?.[0]?.created_at ||
+    null;
+  const sharePath = dashboard?.workspace?.slug || 'phillippegroup';
+  const shareUrl = `equitytracker.ca/${sharePath}`;
+
   if (!dashboard) {
     return null;
   }
-
-  const propertyData = dashboard.profile.property_data ?? {};
-  const marketStats = dashboard.homeowner?.marketStats ?? null;
-  const firstName = dashboard.profile.name?.split(' ')[0] || 'there';
-  const latestImportDate =
-    dashboard.importJobs?.[0]?.finished_at ||
-    dashboard.importJobs?.[0]?.created_at ||
-    null;
-  const sharePath = dashboard.workspace?.slug || 'phillippegroup';
-  const shareUrl = `equitytracker.ca/${sharePath}`;
 
   async function handleCopyLink() {
     try {

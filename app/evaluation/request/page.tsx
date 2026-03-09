@@ -1,4 +1,5 @@
 import { RequestPreciseEvaluationForm } from './RequestPreciseEvaluationForm';
+import { ContactTeamModal } from './ContactTeamModal';
 import { createServerClient } from '@/lib/supabase/server';
 
 interface SearchParams {
@@ -78,12 +79,7 @@ export default async function EvaluationRequestPage({
               The Phillippe Group
             </h1>
           </div>
-          <a
-            href="/daniel-phillippe.vcf"
-            className="inline-flex items-center justify-center rounded-full border border-white/12 px-5 py-3 text-sm font-medium text-white transition-colors hover:border-accent-blue/60 hover:bg-accent-blue/10 sm:absolute sm:right-6 sm:top-1/2 sm:-translate-y-1/2"
-          >
-            Contact The Team Directly
-          </a>
+          <ContactTeamModal />
         </div>
 
         <div className="grid flex-1 gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">

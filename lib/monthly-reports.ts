@@ -9,6 +9,10 @@ import {
   getRecentMarketSnapshots,
   getRecentMarketStats,
 } from '@/lib/estimation/hpi';
+import {
+  applyRenovationValueAdd,
+  resolveRenovationValueAdd,
+} from '@/lib/renovation-adjustment';
 import { createServerClient } from '@/lib/supabase/server';
 
 interface SubscriberRecord {
@@ -29,6 +33,9 @@ interface MonthlyReportPropertyData {
   purchaseMonth: number;
   purchasePrice: number;
   estimatedCurrentValue?: number;
+  modelEstimatedCurrentValue?: number;
+  currentValueOverride?: number | null;
+  renovationValueAdd?: number;
   netEquity?: number;
   mortgageAssumptions: {
     interestRate?: number;
@@ -41,6 +48,7 @@ interface MonthlyReportPropertyData {
     currentInterestRate?: number;
     currentAmortization?: number;
     refinanceYear?: number;
+    renovationValueAdd?: number;
   };
   [key: string]: unknown;
 }
@@ -182,6 +190,8 @@ function getLastDeliveredReportMonth(
 function buildUpdatedPropertyData(
   propertyData: MonthlyReportPropertyData,
   estimatedCurrentValue: number,
+  modelEstimatedCurrentValue: number,
+  renovationValueAdd: number,
   netEquity: number,
   marketStats: CurrentMarketStats | null,
   reportMonth: string | null,
@@ -190,6 +200,8 @@ function buildUpdatedPropertyData(
   return {
     ...propertyData,
     estimatedCurrentValue,
+    modelEstimatedCurrentValue,
+    renovationValueAdd,
     netEquity,
     currentMarketStats: marketStats,
     latestMonthlyReport: {
@@ -329,14 +341,25 @@ export async function runMonthlyReports(
     });
 
     const totalOutstandingDebt = mortgagePosition.totalOutstandingDebt;
-    const estimatedCurrentValue = estimateResult.estimatedCurrentValue;
+    const modelEstimatedCurrentValue = estimateResult.estimatedCurrentValue;
+    const renovationValueAdd = resolveRenovationValueAdd(
+      propertyData,
+      modelEstimatedCurrentValue
+    );
+    const estimatedCurrentValue = applyRenovationValueAdd(
+      modelEstimatedCurrentValue,
+      renovationValueAdd
+    );
     const netEquity = calculateNetEquity(estimatedCurrentValue, totalOutstandingDebt);
 
     const currentHpi = currentSnapshot?.hpiIndex ?? null;
     const previousHpi = previousSnapshot?.hpiIndex ?? null;
     const previousValue =
       currentHpi !== null && previousHpi !== null && currentHpi !== 0
-        ? Math.round(estimatedCurrentValue * (previousHpi / currentHpi))
+        ? applyRenovationValueAdd(
+            Math.round(modelEstimatedCurrentValue * (previousHpi / currentHpi)),
+            renovationValueAdd
+          )
         : Math.round(parseNumber(propertyData.estimatedCurrentValue) ?? estimatedCurrentValue);
 
     const benchmarkPrice = currentSnapshot?.benchmarkPrice ?? estimateResult.benchmarkCurrent;
@@ -432,6 +455,8 @@ export async function runMonthlyReports(
     const updatedPropertyData = buildUpdatedPropertyData(
       propertyData,
       estimatedCurrentValue,
+      modelEstimatedCurrentValue,
+      renovationValueAdd,
       netEquity,
       currentMarketStats,
       currentReportMonth,

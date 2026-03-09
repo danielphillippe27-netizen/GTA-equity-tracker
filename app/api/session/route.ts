@@ -15,6 +15,7 @@ export async function POST(request: NextRequest) {
       const supabase = createServerClient();
       
       const { error } = await supabase.from('sessions').insert({
+        id: sessionId,
         metadata: metadata || {},
       });
 

@@ -11,6 +11,9 @@ export interface EstimatePropertyData {
   purchaseMonth: number;
   purchasePrice: number;
   estimatedCurrentValue?: number;
+  modelEstimatedCurrentValue?: number;
+  currentValueOverride?: number | null;
+  renovationValueAdd?: number;
   netEquity?: number;
   mortgageAssumptions: {
     interestRate: number;
@@ -23,6 +26,7 @@ export interface EstimatePropertyData {
     currentInterestRate?: number;
     currentAmortization?: number;
     refinanceYear?: number;
+    renovationValueAdd?: number;
   };
 }
 

@@ -9,11 +9,10 @@ interface ClientEquityHeroProps {
   purchaseLabel: string;
   neighborhood?: string | null;
   estimatedValue: number | null;
-  mortgageBalance: number | null;
+  principalPaidSincePurchase: number | null;
   netEquity: number | null;
   monthOverMonthValuePercent: number | null;
   monthlyMortgagePaydown: number | null;
-  monthlyEquityChange: number | null;
   interpretation: string;
 }
 
@@ -44,11 +43,10 @@ function TrendLine({
 
 export function ClientEquityHero({
   estimatedValue,
-  mortgageBalance,
+  principalPaidSincePurchase,
   netEquity,
   monthOverMonthValuePercent,
   monthlyMortgagePaydown,
-  monthlyEquityChange,
   interpretation,
 }: ClientEquityHeroProps) {
   return (
@@ -85,14 +83,14 @@ export function ClientEquityHero({
 
           <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
             <p className="mb-2 text-xs uppercase tracking-[0.18em] text-muted-foreground">
-              Estimated Mortgage Balance
+              Mortgage Paid Down Since Purchase
             </p>
             <p className="text-3xl font-semibold text-foreground">
-              {formatPrimaryValue(mortgageBalance)}
+              {formatPrimaryValue(principalPaidSincePurchase)}
             </p>
             {monthlyMortgagePaydown !== null ? (
               <TrendLine tone={monthlyMortgagePaydown >= 0 ? 'positive' : 'negative'}>
-                {monthlyMortgagePaydown >= 0 ? '-' : '+'}
+                {monthlyMortgagePaydown >= 0 ? '+' : '-'}
                 {formatCurrency(Math.abs(monthlyMortgagePaydown))} vs last month
               </TrendLine>
             ) : null}

@@ -18,6 +18,7 @@ interface EditableMortgageValues {
   amortization: number;
   secondaryMortgageBalance: number;
   helocBalance: number;
+  renovationValueAdd: number;
   hasRefinanced: boolean;
   currentMortgageBalance: number;
   currentInterestRate: number;

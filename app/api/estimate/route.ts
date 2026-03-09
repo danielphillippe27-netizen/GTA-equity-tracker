@@ -11,6 +11,38 @@ import { getDataEra, HPI_START_YEAR } from '@/src/data/historic-averages';
 import { v4 as uuidv4 } from 'uuid';
 import { getWorkspaceBySlug } from '@/lib/workspaces';
 
+async function ensureSessionExists(
+  supabase: ReturnType<typeof createServerClient>,
+  requestedSessionId?: string | null
+) {
+  const sessionId = requestedSessionId || uuidv4();
+
+  const { data: existingSession, error: selectError } = await supabase
+    .from('sessions')
+    .select('id')
+    .eq('id', sessionId)
+    .maybeSingle();
+
+  if (selectError) {
+    throw selectError;
+  }
+
+  if (!existingSession) {
+    const { error: insertError } = await supabase.from('sessions').insert({
+      id: sessionId,
+      metadata: {
+        source: 'api/estimate',
+      },
+    });
+
+    if (insertError) {
+      throw insertError;
+    }
+  }
+
+  return sessionId;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -101,11 +133,12 @@ export async function POST(request: NextRequest) {
     // Store in database if Supabase is configured
     if (isSupabaseServerConfigured()) {
       const supabase = createServerClient();
+      const persistedSessionId = await ensureSessionExists(supabase, sessionId);
       
       const { error } = await supabase.from('estimates').insert({
         id: estimateId,
         workspace_id: workspace.id,
-        session_id: sessionId || uuidv4(),
+        session_id: persistedSessionId,
         address: `${region} - ${propertyType}`,
         purchase_year: result.input.purchaseYear,
         purchase_month: result.input.purchaseMonth,
@@ -127,7 +160,10 @@ export async function POST(request: NextRequest) {
 
       if (error) {
         console.error('Failed to store estimate:', error);
-        // Continue anyway - return the calculated result
+        return NextResponse.json(
+          { error: 'Failed to store estimate. Please try again.' },
+          { status: 500 }
+        );
       }
     }
 
@@ -176,6 +212,29 @@ export async function GET(request: NextRequest) {
         { status: 404 }
       );
     }
+
+    const [subscriberPropertyResponse, agentClientPropertyResponse] = await Promise.all([
+      supabase
+        .from('subscribers')
+        .select('property_data')
+        .eq('estimate_id', estimateId)
+        .order('subscribed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from('agent_clients')
+        .select('property_data')
+        .eq('estimate_id', estimateId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+
+    const subscriberPropertyData =
+      (subscriberPropertyResponse.data?.property_data as Record<string, unknown> | undefined) ?? null;
+    const agentClientPropertyData =
+      (agentClientPropertyResponse.data?.property_data as Record<string, unknown> | undefined) ?? null;
+    const persistedPropertyData = subscriberPropertyData ?? agentClientPropertyData;
 
     // Parse region and property type from address field (backward compatible)
     const addressParts = data.address.split(' - ');
@@ -289,7 +348,11 @@ export async function GET(request: NextRequest) {
       result.bridgeNote = liveBridgeResult.bridgeNote;
     }
 
-    return NextResponse.json({ estimateId, result });
+    return NextResponse.json({
+      estimateId,
+      result,
+      propertyData: persistedPropertyData,
+    });
   } catch (error) {
     console.error('Estimate retrieval error:', error);
     return NextResponse.json(

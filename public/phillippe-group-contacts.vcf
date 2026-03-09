@@ -1,0 +1,18 @@
+BEGIN:VCARD
+VERSION:3.0
+FN:Daniel Phillippe
+N:Phillippe;Daniel;;;
+ORG:The Phillippe Group
+TITLE:Sales Representative
+TEL;TYPE=CELL,VOICE:+1-289-675-2788
+EMAIL;TYPE=INTERNET:dphillippe@revelrealty.ca
+END:VCARD
+BEGIN:VCARD
+VERSION:3.0
+FN:Santana Phillippe
+N:Phillippe;Santana;;;
+ORG:The Phillippe Group
+TITLE:Sales Representative
+TEL;TYPE=CELL,VOICE:+1-905-261-9598
+EMAIL;TYPE=INTERNET:sphillippe@revelrealty.ca
+END:VCARD

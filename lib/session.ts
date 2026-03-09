@@ -41,6 +41,7 @@ export async function initializeSession(): Promise<string> {
     if (!existingSession) {
       // Create new session
       const { error } = await supabase.from('sessions').insert({
+        id: sessionId,
         metadata: {
           userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
           referrer: typeof document !== 'undefined' ? document.referrer : undefined,

@@ -70,17 +70,19 @@ function calculateScenario(
  */
 function generateHistoricTrend(
   fromYear: number,
-  toYear: number
+  toYear: number,
+  priceScale = 1
 ): HPIDataPoint[] {
   const trend: HPIDataPoint[] = [];
   
   for (let year = fromYear; year <= toYear; year++) {
     if (HISTORIC_AVERAGES[year]) {
+      const scaledPrice = HISTORIC_AVERAGES[year] * priceScale;
       trend.push({
         reportMonth: `${year}-06`, // Use June as midpoint
         // Keep synthetic trend points on the same scale as the synthetic current/purchase HPI values.
-        hpiIndex: HISTORIC_AVERAGES[year] / 10000,
-        benchmarkPrice: HISTORIC_AVERAGES[year],
+        hpiIndex: scaledPrice / 10000,
+        benchmarkPrice: Math.round(scaledPrice),
       });
     }
   }
@@ -169,12 +171,13 @@ async function calculateHistoricEquity(
   const purchaseAverage = getHistoricAverageWithFallback(purchaseYear);
   console.log('[Historic Equity] Purchase year average:', purchaseAverage);
   
+  // Use the HPI handover year as a local benchmark anchor for pre-2012 purchases.
+  const anchorAverage = getHistoricAverageWithFallback(HPI_START_YEAR);
+  console.log('[Historic Equity] Anchor average (year', HPI_START_YEAR, '):', anchorAverage);
+
   // Get the current/latest average
   const currentAverage = getHistoricAverageWithFallback(LATEST_YEAR);
   console.log('[Historic Equity] Current average (year', LATEST_YEAR, '):', currentAverage);
-
-  // Generate synthetic trend data
-  let hpiTrend = generateHistoricTrend(purchaseYear, LATEST_YEAR);
   
   // Fetch regional benchmark prices in parallel with HPI trend.
   // For pre-2012 purchases, do not let the benchmark lookup walk forward and mislabel
@@ -182,6 +185,7 @@ async function calculateHistoricEquity(
   const [
     benchmarkAtPurchaseResult,
     benchmarkCurrentResult,
+    benchmarkAtAnchorResult,
     hpiTrendRecent,
     currentMarketStats,
   ] = await Promise.all([
@@ -190,40 +194,52 @@ async function calculateHistoricEquity(
       allowFutureFallback: false,
     }),
     getCurrentBenchmarkPrice(region, propertyType, scope),
+    getBenchmarkPrice(region, propertyType, HPI_START_YEAR, purchaseMonth, scope),
     getHPITrend(region, propertyType, HPI_START_YEAR, 1, scope).catch(() => []),
     getCurrentMarketStats(region, propertyType, scope),
   ]);
   
   console.log('[Historic Equity] Benchmark prices:', {
     atPurchase: benchmarkAtPurchaseResult,
+    atAnchor: benchmarkAtAnchorResult,
     current: benchmarkCurrentResult,
   });
 
-  // Preserve the home's relative position to the market at purchase, then map that
-  // ratio onto today's local benchmark. This avoids importing GTA-wide annual growth
-  // directly into a municipality-level benchmark series.
-  const purchaseRatioToHistoricAverage = purchasePrice / purchaseAverage;
-  const bridgedCurrentAverage = benchmarkCurrentResult?.price
-    ? benchmarkCurrentResult.price * purchaseRatioToHistoricAverage
-    : currentAverage;
+  const hasLocalAnchor = Boolean(benchmarkAtAnchorResult?.price && anchorAverage > 0);
+  const localScale = hasLocalAnchor
+    ? (benchmarkAtAnchorResult?.price ?? anchorAverage) / anchorAverage
+    : 1;
 
-  const appreciationFactor = bridgedCurrentAverage / purchaseAverage;
+  // Build a localized synthetic pre-2012 baseline; fallback remains GTA-wide if local
+  // anchor data is unavailable.
+  const localizedPurchaseBaseline = purchaseAverage * localScale;
+  const fallbackCurrentBaseline = currentAverage * localScale;
+  const currentBenchmarkEquivalent = benchmarkCurrentResult?.price ?? fallbackCurrentBaseline;
+  const appreciationFactor = currentBenchmarkEquivalent / localizedPurchaseBaseline;
   console.log('[Historic Equity] Appreciation factor:', appreciationFactor);
+
+  // Generate synthetic trend data after we know whether we can localize the historic series.
+  let hpiTrend = generateHistoricTrend(purchaseYear, LATEST_YEAR, localScale);
   
   // Calculate estimated current value
   const estimatedCurrentValue = Math.round(purchasePrice * appreciationFactor);
   const equityGained = estimatedCurrentValue - purchasePrice;
   const roiPercent = Math.round((appreciationFactor - 1) * 100 * 10) / 10;
   
-  // Merge historic and HPI trends if we have recent data
+  // Merge recent benchmark points (converted to synthetic index scale) so the
+  // series stays consistent with historic synthetic points.
   if (hpiTrendRecent.length > 0) {
     const mergedTrend = [...hpiTrend];
     for (const point of hpiTrendRecent) {
       const year = parseInt(point.reportMonth.split('-')[0], 10);
-      if (year >= HPI_START_YEAR) {
+      if (year >= HPI_START_YEAR && point.benchmarkPrice !== null) {
         // Only add if we don't already have this year
         if (!mergedTrend.find(p => p.reportMonth.startsWith(point.reportMonth.substring(0, 4)))) {
-          mergedTrend.push(point);
+          mergedTrend.push({
+            reportMonth: point.reportMonth,
+            hpiIndex: point.benchmarkPrice / 10000,
+            benchmarkPrice: point.benchmarkPrice,
+          });
         }
       }
     }
@@ -256,15 +272,19 @@ async function calculateHistoricEquity(
   
   // Create synthetic HPI values for display
   const syntheticHpiAtPurchase = purchaseAverage / 10000; // Normalize to ~index scale
-  const syntheticHpiCurrent = bridgedCurrentAverage / 10000;
+  const syntheticLocalizedPurchase = localizedPurchaseBaseline / 10000;
+  const syntheticHpiCurrent = currentBenchmarkEquivalent / 10000;
   const currentValueDate = benchmarkCurrentResult?.date
     ? benchmarkCurrentResult.date.slice(0, 7)
     : `${LATEST_YEAR}-12`;
   const usedMonthlyBridge = benchmarkCurrentResult?.price !== undefined;
+  const usedLocalizedBridge = Boolean(
+    benchmarkCurrentResult?.price !== undefined && benchmarkAtAnchorResult?.price !== undefined
+  );
   
   return {
     input,
-    hpiAtPurchase: syntheticHpiAtPurchase,
+    hpiAtPurchase: usedLocalizedBridge ? syntheticLocalizedPurchase : syntheticHpiAtPurchase,
     hpiCurrent: syntheticHpiCurrent,
     hpiCurrentDate: currentValueDate,
     appreciationFactor: Math.round(appreciationFactor * 1000) / 1000,
@@ -275,12 +295,16 @@ async function calculateHistoricEquity(
     calculatedAt: new Date().toISOString(),
     scenarios,
     dataEra: 'historic',
-    dataSource: usedMonthlyBridge
-      ? 'TRREB Historic Annual Averages + TRREB Benchmark Bridge'
+    dataSource: usedLocalizedBridge
+      ? 'TRREB Local Benchmark Bridge + Historic Ratio Scaler'
+      : usedMonthlyBridge
+      ? 'TRREB Historic Annual Averages + Current Local Benchmark'
       : 'TRREB Historic Annual Averages',
     bridgeNote: purchaseYear < HPI_START_YEAR 
-      ? usedMonthlyBridge
-        ? 'Using the purchase-year market ratio to anchor against the latest local TRREB benchmark.'
+      ? usedLocalizedBridge
+        ? `Using ${HPI_START_YEAR} local benchmark anchor to localize pre-${HPI_START_YEAR} values before mapping to the latest local TRREB benchmark.`
+        : usedMonthlyBridge
+        ? 'Using latest local benchmark with GTA historic ratio fallback because local handover anchor is unavailable.'
         : `Using synthetic index based on TRREB average price trends for years prior to ${HPI_START_YEAR}.`
       : undefined,
     // Regional benchmark prices

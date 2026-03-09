@@ -171,6 +171,33 @@ def resolve_area(name: str, area_lookup: dict[str, str], area_by_id: dict[str, d
     return area_id
 
 
+def normalize_hpi_area_name(value: str) -> str:
+    cleaned = re.sub(r"^(Zone|Municipality):\s*", "", value).strip()
+    return re.sub(r"\s+", " ", cleaned)
+
+
+def parse_hpi_section_header(line: str) -> str | None:
+    # Modern HPI PDFs use section headers like:
+    # "1 Storey Attached    Benchmark    Index"
+    match = re.match(r"^(.+?)\s{2,}Benchmark\s+Index\s*$", line)
+    if not match:
+        return None
+    return re.sub(r"\s+", " ", match.group(1)).strip()
+
+
+def parse_hpi_section_row(line: str) -> tuple[str, float, float] | None:
+    parts = [part.strip() for part in re.split(r"\s{2,}", line) if part.strip()]
+    if len(parts) < 3:
+        return None
+
+    benchmark_price = parse_decimal(parts[1])
+    hpi_index = parse_decimal(parts[2])
+    if benchmark_price is None or hpi_index is None:
+        return None
+
+    return normalize_hpi_area_name(parts[0]), hpi_index, benchmark_price
+
+
 def extract_hpi_rows(
     pdf_path: Path,
     workspace_id: str,
@@ -188,10 +215,43 @@ def extract_hpi_rows(
         capture_output=True,
         text=True,
     ).stdout
+    in_section_layout = False
+    current_property_type_id: str | None = None
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line or "Index Benchmark" in line or "FOCUS ON THE MLS" in line:
             continue
+
+        section_name = parse_hpi_section_header(line)
+        if section_name:
+            in_section_layout = True
+            current_property_type_id = property_type_by_name.get(slugify(section_name))
+            continue
+
+        if in_section_layout:
+            if not current_property_type_id:
+                continue
+            parsed = parse_hpi_section_row(line)
+            if not parsed:
+                continue
+            area_name, hpi_index, benchmark_price = parsed
+            resolved = resolve_area(area_name, area_lookup, area_by_id)
+            if not resolved:
+                continue
+            rows.append(
+                {
+                    "workspace_id": workspace_id,
+                    "period": period,
+                    "area_id": resolved,
+                    "property_type_id": current_property_type_id,
+                    "hpi_index": hpi_index,
+                    "benchmark_price": benchmark_price,
+                    "source_doc_id": pdf_path.name,
+                    "source_hash": source_hash,
+                }
+            )
+            continue
+
         if line in {"ALL TRREB AREAS", "CITY OF TORONTO"}:
             continue
         tokens = line.split()
@@ -206,7 +266,7 @@ def extract_hpi_rows(
                 continue
         if numeric_start is None or numeric_start == 0:
             continue
-        area_name = " ".join(tokens[:numeric_start])
+        area_name = normalize_hpi_area_name(" ".join(tokens[:numeric_start]))
         resolved = resolve_area(area_name, area_lookup, area_by_id)
         if not resolved:
             continue

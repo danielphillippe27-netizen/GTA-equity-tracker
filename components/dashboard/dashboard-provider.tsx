@@ -51,6 +51,17 @@ export interface DashboardPayload {
       contactPhone?: string | null;
       contactEmail?: string | null;
     } | null;
+    settings?: {
+      monthlyReportTemplate?: {
+        brandName?: string | null;
+        introText?: string | null;
+        ctaText?: string | null;
+        footerNote?: string | null;
+        bottomLogoLeftUrl?: string | null;
+        bottomLogoUrl?: string | null;
+        bottomLogoRightUrl?: string | null;
+      } | null;
+    } | null;
   } | null;
   billing?: {
     status: string;

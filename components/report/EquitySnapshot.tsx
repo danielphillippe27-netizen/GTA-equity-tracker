@@ -1,6 +1,9 @@
 'use client';
 
+import { ChevronDown } from 'lucide-react';
 import { formatCurrency } from '@/lib/constants';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 interface EquitySnapshotProps {
   estimatedValue: number | null;
@@ -11,6 +14,8 @@ interface EquitySnapshotProps {
   refinancePayment: number | null;
   refinanceDelta: number | null;
   accessedEquitySincePurchase: number | null;
+  renovationValueAdd: number;
+  onRenovationValueAddChange: (value: number) => void;
 }
 
 export function EquitySnapshot({
@@ -22,6 +27,8 @@ export function EquitySnapshot({
   refinancePayment,
   refinanceDelta,
   accessedEquitySincePurchase,
+  renovationValueAdd,
+  onRenovationValueAddChange,
 }: EquitySnapshotProps) {
   const hasCoreValues =
     estimatedValue !== null &&
@@ -162,6 +169,38 @@ export function EquitySnapshot({
                 : 'Not available.'}
             </span>
           </div>
+          <details className="group rounded-xl border border-border/70 bg-background/20 p-4">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-foreground">
+              <span>Renovations (optional)</span>
+              <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
+            </summary>
+            <div className="mt-4 space-y-3">
+              <div>
+                <Label
+                  htmlFor="renovation-value-add"
+                  className="text-xs uppercase tracking-[0.18em] text-muted-foreground"
+                >
+                  Value Added From Renovations
+                </Label>
+                <Input
+                  id="renovation-value-add"
+                  type="number"
+                  min="0"
+                  value={renovationValueAdd}
+                  onChange={(event) => {
+                    const parsed = Number(event.target.value.replace(/,/g, ''));
+                    onRenovationValueAddChange(
+                      Number.isFinite(parsed) ? Math.max(0, parsed) : 0
+                    );
+                  }}
+                  className="mt-2 h-11 border-border bg-background/20 text-foreground"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                This amount is added to your current estimated value and will be reused on future reports.
+              </p>
+            </div>
+          </details>
           <p className="text-xs text-muted-foreground">(Subject to lender approval)</p>
         </div>
       </div>
