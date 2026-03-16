@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { ShieldCheck } from 'lucide-react';
+import { SellBuyCalculatorScreen } from '@/components/calculators/SellBuyCalculator';
 import {
   CalculationDetailsDisclosure,
   ClientEquityHero,
@@ -18,6 +19,7 @@ import { GlowButton } from '@/components/shared';
 import { ContactTeamModal } from '@/app/evaluation/request/ContactTeamModal';
 import { formatCurrency } from '@/lib/constants';
 import { CurrentMarketStats, HPIEstimateResult } from '@/lib/estimation/hpi';
+import { cn } from '@/lib/utils';
 import {
   getLatestEstimateResult,
   getLatestPropertyData,
@@ -36,6 +38,7 @@ import {
   applyRenovationValueAdd,
   resolveRenovationValueAdd,
 } from '@/lib/renovation-adjustment';
+import type { SellBuyCalculatorFormValues } from '@/types/sell-buy-calculator';
 
 interface BridgeEstimateResult extends HPIEstimateResult {
   dataEra?: 'historic' | 'hpi';
@@ -67,6 +70,8 @@ interface EditableMortgageAssumptions {
   currentAmortization: number;
   refinanceYear: number;
 }
+
+type ResultsTab = 'dashboard' | 'sell-buy';
 
 function formatPurchaseLabel(year: number, month: number) {
   return new Date(year, month - 1).toLocaleString('en-US', {
@@ -215,6 +220,14 @@ function percentChange(current: number | null, previous: number | null): number 
   return ((current - previous) / previous) * 100;
 }
 
+function roundToNearestStep(value: number, step: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+
+  return Math.round(value / step) * step;
+}
+
 export default function ResultsPage() {
   const params = useParams();
   const estimateId = params.sessionId as string;
@@ -222,6 +235,7 @@ export default function ResultsPage() {
   const [result, setResult] = useState<BridgeEstimateResult | null>(null);
   const [propertyData, setPropertyData] = useState<EstimatePropertyData | null>(null);
   const [editableAssumptions, setEditableAssumptions] = useState<EditableMortgageAssumptions | null>(null);
+  const [activeTab, setActiveTab] = useState<ResultsTab>('dashboard');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -558,6 +572,70 @@ export default function ResultsPage() {
     mortgageAvailable: Boolean(mortgagePosition),
   });
   const marketStats = result.currentMarketStats;
+  const estimatedCurrentValueForCalculator = Math.max(
+    0,
+    roundToNearestStep(adjustedEstimatedCurrentValue ?? result.estimatedCurrentValue, 1000)
+  );
+  const currentMortgageBalanceForCalculator = Math.max(
+    0,
+    mortgagePosition?.totalOutstandingDebt ??
+      editableAssumptions?.currentMortgageBalance ??
+      propertyData?.mortgageAssumptions.currentMortgageBalance ??
+      0
+  );
+  const currentMonthlyPaymentForCalculator = Math.max(
+    0,
+    currentEstimatedDebtPayment ?? mortgagePosition?.summary.monthlyPayment ?? 0
+  );
+  const effectiveCurrentRateForCalculator = Math.max(
+    0,
+    editableAssumptions?.currentInterestRate ??
+      mortgagePosition?.summary.interestRate ??
+      editableAssumptions?.interestRate ??
+      0
+  );
+  const calculatorInitialValues: SellBuyCalculatorFormValues = {
+      currentHome: {
+        estimatedCurrentValue: estimatedCurrentValueForCalculator,
+        expectedSalePrice: estimatedCurrentValueForCalculator,
+        currentMortgageBalance: currentMortgageBalanceForCalculator,
+        currentInterestRate: effectiveCurrentRateForCalculator,
+        currentMonthlyPayment: currentMonthlyPaymentForCalculator,
+        realtorCommissionPercent: 4.5,
+        commissionIncludesHst: true,
+        legalFeesOnSale: 3500,
+        mortgageDischargeFee: 0,
+        mortgagePenalty: 0,
+      bridgeFinancingEstimate: 0,
+    },
+    purchase: {
+      purchasePrice: Math.max(500000, roundToNearestStep(estimatedCurrentValueForCalculator, 5000)),
+      province: 'ON',
+      city: result.input.region,
+      propertyTaxesAnnual: 0,
+      condoFeesMonthly: 0,
+      purchaseLegalFees: 0,
+      titleInsuranceAndAdjustments: 0,
+      additionalCashAdded: 0,
+      equityStrategy: 'all',
+      customEquityAmount: 0,
+      reserveAmount: 50000,
+    },
+    financing: {
+      mode: 'simple',
+      simpleInterestRate:
+        effectiveCurrentRateForCalculator || editableAssumptions?.interestRate || 4.04,
+      amortizationYears:
+        editableAssumptions?.currentAmortization ?? editableAssumptions?.amortization ?? 25,
+      paymentFrequency: 'monthly',
+      portExistingMortgage: false,
+      portedMortgageBalance: 0,
+      portedInterestRate: 0,
+      topUpInterestRate:
+        effectiveCurrentRateForCalculator || editableAssumptions?.interestRate || 4.04,
+      manualBlendedRate: 0,
+    },
+  };
 
   return (
     <main className="min-h-screen bg-background">
@@ -584,6 +662,36 @@ export default function ResultsPage() {
       </header>
 
       <div className="relative z-10 mx-auto max-w-6xl px-4 pb-16">
+        <motion.section
+          className="py-6"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+        >
+          <div className="inline-flex rounded-full border border-border/70 bg-surface/70 p-1">
+            {[
+              { id: 'dashboard', label: 'Dashboard' },
+              { id: 'sell-buy', label: 'Sell & Buy Calculator' },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id as ResultsTab)}
+                className={cn(
+                  'rounded-full px-5 py-2.5 text-sm font-medium transition-colors',
+                  activeTab === tab.id
+                    ? 'bg-accent-blue text-primary-foreground shadow-[0_12px_30px_rgba(59,130,246,0.35)]'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </motion.section>
+
+        {activeTab === 'dashboard' ? (
+          <>
         <motion.section
           className="py-8 sm:py-10"
           initial={{ opacity: 0, y: 20 }}
@@ -757,6 +865,17 @@ export default function ResultsPage() {
           <span>Data source: TRREB benchmark &amp; market stats.</span>
           {marketStats?.reportMonth ? <span>Latest market pulse month: {formatPeriodLabel(marketStats.reportMonth)}.</span> : null}
         </footer>
+          </>
+        ) : (
+          <motion.section
+            className="pb-8"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35 }}
+          >
+            <SellBuyCalculatorScreen embedded initialValues={calculatorInitialValues} />
+          </motion.section>
+        )}
       </div>
     </main>
   );

@@ -121,36 +121,13 @@ interface DashboardContextValue {
 
 const DashboardContext = createContext<DashboardContextValue | undefined>(undefined);
 
-async function fetchDashboard(accessToken: string, slug?: string) {
-  const searchParams = new URLSearchParams();
-  if (slug) {
-    searchParams.set('slug', slug);
-  }
-
-  const response = await fetch(
-    `/api/dashboard${searchParams.size ? `?${searchParams.toString()}` : ''}`,
-    {
-    cache: 'no-store',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-    }
-  );
-
-  const payload = (await response.json()) as DashboardPayload & DashboardErrorResponse;
-
-  if (!response.ok) {
-    throw new Error(
-      payload.detail
-        ? `${payload.error || 'Unable to load dashboard.'}: ${payload.detail}`
-        : payload.error || 'Unable to load dashboard.'
-    );
-  }
-
-  return payload;
-}
-
-export function DashboardProvider({ children }: { children: ReactNode }) {
+export function DashboardProvider({
+  children,
+  endpoint = '/api/dashboard',
+}: {
+  children: ReactNode;
+  endpoint?: string;
+}) {
   const router = useRouter();
   const { user, session, loading } = useAuth();
   const tenant = useOptionalTenant();
@@ -174,7 +151,11 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     setError(null);
 
     try {
-      const payload = await fetchDashboard(session.access_token, tenant?.slug);
+      const payload = await fetchDashboardWithEndpoint(
+        endpoint,
+        session.access_token,
+        tenant?.slug
+      );
       setDashboard(payload);
       return payload;
     } catch (fetchError) {
@@ -187,7 +168,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoadingDashboard(false);
     }
-  }, [session?.access_token, tenant?.slug]);
+  }, [endpoint, session?.access_token, tenant?.slug]);
 
   useEffect(() => {
     if (loading) {
@@ -214,6 +195,35 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       {children}
     </DashboardContext.Provider>
   );
+}
+
+async function fetchDashboardWithEndpoint(accessEndpoint: string, accessToken: string, slug?: string) {
+  const searchParams = new URLSearchParams();
+  if (slug) {
+    searchParams.set('slug', slug);
+  }
+
+  const response = await fetch(
+    `${accessEndpoint}${searchParams.size ? `?${searchParams.toString()}` : ''}`,
+    {
+      cache: 'no-store',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    }
+  );
+
+  const payload = (await response.json()) as DashboardPayload & DashboardErrorResponse;
+
+  if (!response.ok) {
+    throw new Error(
+      payload.detail
+        ? `${payload.error || 'Unable to load dashboard.'}: ${payload.detail}`
+        : payload.error || 'Unable to load dashboard.'
+    );
+  }
+
+  return payload;
 }
 
 export function useDashboard() {

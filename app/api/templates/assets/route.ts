@@ -4,6 +4,7 @@ import path from 'node:path';
 import { NextResponse } from 'next/server';
 import { createRequestClient } from '@/lib/supabase/request';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { isFounderEmail } from '@/lib/founder-access';
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml']);
@@ -20,6 +21,8 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const founderAccess = isFounderEmail(user.email);
 
   const formData = await request.formData();
   const workspaceId = String(formData.get('workspaceId') || '').trim();
@@ -63,7 +66,7 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!membership) {
+  if (!membership && !founderAccess) {
     return NextResponse.json(
       { error: 'Only workspace owners can upload template assets.' },
       { status: 403 }

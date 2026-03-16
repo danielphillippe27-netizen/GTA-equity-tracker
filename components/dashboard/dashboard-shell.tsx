@@ -1,18 +1,14 @@
 'use client';
 
+import { useEffect } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
-  ChartColumn,
-  CreditCard,
-  Database,
   FileText,
   Home,
   LogOut,
   Settings,
-  Upload,
-  UserRoundPlus,
   Users,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth/AuthProvider';
@@ -20,28 +16,63 @@ import { useDashboard } from '@/components/dashboard/dashboard-provider';
 import { useOptionalTenant } from '@/components/tenant/TenantProvider';
 import { cn } from '@/lib/utils';
 
-const navigationItems: Array<{
+const founderNavigationItems: Array<{
   href: string;
   label: string;
   icon: LucideIcon;
 }> = [
   { href: '/dashboard', label: 'Dashboard', icon: Home },
   { href: '/clients', label: 'Clients', icon: Users },
-  { href: '/add-new', label: 'Add New', icon: UserRoundPlus },
-  { href: '/analytics', label: 'Analytics', icon: ChartColumn },
-  { href: '/data', label: 'Data', icon: Database },
-  { href: '/imports', label: 'Imports', icon: Upload },
   { href: '/templates', label: 'Templates', icon: FileText },
-  { href: '/billing', label: 'Billing', icon: CreditCard },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
-export function DashboardShell({ children }: { children: React.ReactNode }) {
+function normalizeClientDashboardPath(pathname: string, hasTenant: boolean) {
+  if (hasTenant) {
+    if (pathname.endsWith('/dashboard')) {
+      return '/dashboard';
+    }
+
+    if (pathname.endsWith('/sell-buy-calculator')) {
+      return '/sell-buy-calculator';
+    }
+
+    return '/dashboard';
+  }
+
+  if (pathname === '/dashboard' || pathname === '/sell-buy-calculator') {
+    return pathname;
+  }
+
+  return '/dashboard';
+}
+
+export function DashboardShell({
+  children,
+  mode = 'client',
+  basePath = '',
+}: {
+  children: React.ReactNode;
+  mode?: 'client' | 'founder';
+  basePath?: string;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading, signOut } = useAuth();
   const { dashboard, error, loadingDashboard } = useDashboard();
   const tenant = useOptionalTenant();
+
+  useEffect(() => {
+    if (mode !== 'client') {
+      return;
+    }
+
+    const normalizedPath = normalizeClientDashboardPath(pathname, Boolean(tenant));
+
+    if (normalizedPath !== pathname) {
+      router.replace(normalizedPath);
+    }
+  }, [mode, pathname, router, tenant]);
 
   async function handleSignOut() {
     await signOut();
@@ -79,7 +110,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               Dashboard Error
             </p>
             <h1 className="mt-3 text-3xl font-semibold text-foreground">
-              The Realtor dashboard did not load.
+              {mode === 'founder' ? 'The founder dashboard did not load.' : 'The client dashboard did not load.'}
             </h1>
             <p className="mt-4 text-sm leading-7 text-muted-foreground">
               {error || 'Something blocked the dashboard data request before the page could render.'}
@@ -105,69 +136,64 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const isAgentWorkspace = dashboard.accountType === 'agent';
-  const workspaceName =
-    dashboard.workspace?.name ||
-    dashboard.profile.name ||
-    'Equity Tracker';
-  const workspaceBrand = dashboard.workspace?.brand ?? tenant?.brand ?? null;
-  const basePath = tenant?.basePath || (dashboard.workspace?.slug ? `/${dashboard.workspace.slug}` : '');
+  if (mode === 'founder') {
+    const workspaceName = dashboard.workspace?.name || dashboard.profile.name || 'Founder Dashboard';
+    const workspaceBrand = dashboard.workspace?.brand ?? null;
 
-  return (
-    <main className="min-h-screen bg-background">
-      <div className="fixed inset-0 bg-hero-gradient opacity-40 pointer-events-none" />
+    return (
+      <main className="min-h-screen bg-background">
+        <div className="fixed inset-0 bg-hero-gradient opacity-40 pointer-events-none" />
 
-      <header className="fixed inset-x-0 top-0 z-40 border-b border-border/60 bg-background/85 backdrop-blur">
-        <div className="flex min-h-24 items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-          <div className="flex min-w-0 items-center gap-6">
-            <Link href={`${basePath || ''}/dashboard`} className="shrink-0">
-              <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">
-                Equity Tracker
-              </p>
-            </Link>
+        <header className="fixed inset-x-0 top-0 z-40 border-b border-border/60 bg-background/85 backdrop-blur">
+          <div className="flex min-h-24 items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+            <div className="flex min-w-0 items-center gap-6">
+              <Link href={`${basePath}/dashboard`} className="shrink-0">
+                <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">
+                  Founder Dashboard
+                </p>
+              </Link>
 
-            <div className="hidden h-10 w-px bg-border/70 md:block" />
+              <div className="hidden h-10 w-px bg-border/70 md:block" />
 
-            <div className="min-w-0">
-              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                Workspace
-              </p>
-              <div className="mt-1 flex items-center gap-3">
-                {workspaceBrand?.logoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={workspaceBrand.logoUrl}
-                    alt={workspaceName}
-                    className="h-9 w-9 rounded-full border border-border object-cover"
-                  />
-                ) : null}
-                <h1 className="truncate text-lg font-semibold text-foreground">{workspaceName}</h1>
+              <div className="min-w-0">
+                <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                  Workspace
+                </p>
+                <div className="mt-1 flex items-center gap-3">
+                  {workspaceBrand?.logoUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={workspaceBrand.logoUrl}
+                      alt={workspaceName}
+                      className="h-9 w-9 rounded-full border border-border object-cover"
+                    />
+                  ) : null}
+                  <h1 className="truncate text-lg font-semibold text-foreground">{workspaceName}</h1>
+                </div>
               </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Link
+                href="/dashboard"
+                className="hidden text-sm text-muted-foreground transition-colors hover:text-foreground sm:block"
+              >
+                Client dashboard
+              </Link>
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <LogOut className="h-4 w-4" />
+                Sign out
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <Link
-              href="/login"
-              className="hidden text-sm text-muted-foreground transition-colors hover:text-foreground sm:block"
-            >
-              Switch account
-            </Link>
-            <button
-              type="button"
-              onClick={handleSignOut}
-              className="flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <LogOut className="h-4 w-4" />
-              Sign out
-            </button>
-          </div>
-        </div>
-
-        {isAgentWorkspace ? (
           <div className="border-t border-border/60 px-4 py-3 md:hidden">
             <nav className="flex gap-2 overflow-x-auto pb-1">
-              {navigationItems.map((item) => {
+              {founderNavigationItems.map((item) => {
                 const Icon = item.icon;
                 const href = `${basePath}${item.href}`;
                 const isActive = pathname === href;
@@ -190,64 +216,86 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               })}
             </nav>
           </div>
-        ) : null}
+        </header>
+
+        <aside className="fixed bottom-0 left-0 top-24 z-30 hidden w-60 border-r border-sidebar-border bg-sidebar/95 backdrop-blur md:flex md:flex-col">
+          <nav className="flex-1 overflow-y-auto px-4 py-6">
+            <div className="grid gap-2">
+              {founderNavigationItems.map((item) => {
+                const Icon = item.icon;
+                const href = `${basePath}${item.href}`;
+                const isActive = pathname === href;
+
+                return (
+                  <Link
+                    key={item.href}
+                    href={href}
+                    className={cn(
+                      'flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition-colors',
+                      isActive
+                        ? 'bg-sidebar-accent text-sidebar-foreground shadow-[0_18px_40px_rgba(0,0,0,0.24)]'
+                        : 'text-sidebar-accent-foreground hover:bg-sidebar-accent/70 hover:text-sidebar-foreground'
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </nav>
+        </aside>
+
+        <div className="relative z-10 min-h-screen pt-24 md:pl-60">
+          <div className="px-4 py-8 sm:px-6 lg:px-8">
+            <div className="mx-auto max-w-6xl">{children}</div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const displayName = dashboard.profile.name || 'Equity Tracker';
+
+  return (
+    <main className="min-h-screen bg-background">
+      <div className="fixed inset-0 bg-hero-gradient opacity-40 pointer-events-none" />
+
+      <header className="fixed inset-x-0 top-0 z-40 border-b border-border/60 bg-background/85 backdrop-blur">
+        <div className="flex min-h-24 items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+          <div className="min-w-0">
+            <Link href="/dashboard" className="shrink-0">
+              <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">
+                Equity Tracker
+              </p>
+            </Link>
+            <h1 className="mt-2 truncate text-lg font-semibold text-foreground">{displayName}</h1>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Link
+              href="/login"
+              className="hidden text-sm text-muted-foreground transition-colors hover:text-foreground sm:block"
+            >
+              Switch account
+            </Link>
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <LogOut className="h-4 w-4" />
+              Sign out
+            </button>
+          </div>
+        </div>
       </header>
 
-      {isAgentWorkspace ? (
-        <Sidebar
-          basePath={basePath}
-          pathname={pathname}
-        />
-      ) : null}
-
-      <div
-        className={cn(
-          'relative z-10 min-h-screen pt-24',
-          isAgentWorkspace && 'md:pl-60'
-        )}
-      >
+      <div className="relative z-10 min-h-screen pt-24">
         <div className="px-4 py-8 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-6xl">{children}</div>
         </div>
       </div>
     </main>
-  );
-}
-
-function Sidebar({
-  basePath,
-  pathname,
-}: {
-  basePath: string;
-  pathname: string;
-}) {
-  return (
-    <aside className="fixed bottom-0 left-0 top-24 z-30 hidden w-60 border-r border-sidebar-border bg-sidebar/95 backdrop-blur md:flex md:flex-col">
-      <nav className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="grid gap-2">
-          {navigationItems.map((item) => {
-            const Icon = item.icon;
-            const href = `${basePath}${item.href}`;
-            const isActive = pathname === href;
-
-            return (
-              <Link
-                key={item.href}
-                href={href}
-                className={cn(
-                  'flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition-colors',
-                  isActive
-                    ? 'bg-sidebar-accent text-sidebar-foreground shadow-[0_18px_40px_rgba(0,0,0,0.24)]'
-                    : 'text-sidebar-accent-foreground hover:bg-sidebar-accent/70 hover:text-sidebar-foreground'
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                <span>{item.label}</span>
-              </Link>
-            );
-          })}
-        </div>
-      </nav>
-    </aside>
   );
 }

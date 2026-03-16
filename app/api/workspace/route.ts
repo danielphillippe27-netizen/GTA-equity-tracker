@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createRequestClient } from '@/lib/supabase/request';
 import { createServiceRoleClient } from '@/lib/supabase/server';
+import { isFounderEmail } from '@/lib/founder-access';
 import {
   normalizeWorkspaceSlug,
   validateWorkspaceSlug,
@@ -71,6 +72,8 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const founderAccess = isFounderEmail(user.email);
+
   const supabase = createServiceRoleClient();
 
   const body = (await request.json().catch(() => null)) as
@@ -104,7 +107,7 @@ export async function PATCH(request: Request) {
     );
   }
 
-  if (!membership) {
+  if (!membership && !founderAccess) {
     return NextResponse.json(
       { error: 'Only workspace owners can edit workspace settings.' },
       { status: 403 }

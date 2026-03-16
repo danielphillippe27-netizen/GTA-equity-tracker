@@ -2,8 +2,9 @@
 
 import { Suspense, useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { KeyRound, ShieldCheck } from 'lucide-react';
+import { getPostAuthRedirectPath } from '@/lib/auth/client-routing';
 import { supabase } from '@/lib/supabase/client';
 
 export default function ResetPasswordPage() {
@@ -16,7 +17,6 @@ export default function ResetPasswordPage() {
 
 function ResetPasswordForm() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +55,7 @@ function ResetPasswordForm() {
       return;
     }
 
-    const accountType = searchParams.get('intent') === 'agent' ? 'agent' : 'homeowner';
+    const accountType = 'homeowner';
     const bootstrapResponse = await fetch('/api/auth/bootstrap', {
       method: 'POST',
       headers: {
@@ -71,7 +71,8 @@ function ResetPasswordForm() {
       return;
     }
 
-    router.push('/dashboard');
+    const nextPath = await getPostAuthRedirectPath(session.access_token);
+    router.push(nextPath);
   }
 
   return (
@@ -79,12 +80,12 @@ function ResetPasswordForm() {
       <div className="mx-auto max-w-lg rounded-[2rem] border border-border bg-surface/85 p-8 shadow-[0_30px_90px_rgba(0,0,0,0.35)]">
         <div className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-xs uppercase tracking-[0.22em] text-muted-foreground">
           <ShieldCheck className="h-3.5 w-3.5 text-accent-cyan" />
-          Realtor Password Setup
+          Client Password Setup
         </div>
 
         <h1 className="mt-6 text-3xl font-semibold text-foreground">Set your password</h1>
         <p className="mt-3 text-sm leading-7 text-muted-foreground">
-          Create a password for your Realtor dashboard so future logins can go straight in.
+          Create a password for your Equity Tracker account so future logins go straight into your dashboard.
         </p>
 
         <form className="mt-8 grid gap-4" onSubmit={handleSubmit}>

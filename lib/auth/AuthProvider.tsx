@@ -16,8 +16,14 @@ interface AuthContextType {
     options?: {
       accountType?: 'homeowner' | 'agent' | 'owner';
       createAccount?: boolean;
+      fullName?: string;
     }
-  ) => Promise<{ error: AuthError | Error | null }>;
+  ) => Promise<{
+    error: AuthError | Error | null;
+    message: string | null;
+    session: Session | null;
+    user: User | null;
+  }>;
   signInWithOAuth: (
     provider: Extract<Provider, 'google' | 'apple'>,
     options?: {
@@ -92,20 +98,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       options?: {
         accountType?: 'homeowner' | 'agent' | 'owner';
         createAccount?: boolean;
+        fullName?: string;
       }
     ) => {
       try {
         const accountType = options?.accountType || 'homeowner';
         const createAccount = options?.createAccount === true;
+        const fullName = options?.fullName?.trim();
+        const metadata =
+          createAccount && fullName
+            ? {
+                accountType,
+                name: fullName,
+                full_name: fullName,
+              }
+            : {
+                accountType,
+              };
 
-        let authResult = createAccount
+        const authResult = createAccount
           ? await supabase.auth.signUp({
               email,
               password,
               options: {
-                data: {
-                  accountType,
-                },
+                data: metadata,
               },
             })
           : await supabase.auth.signInWithPassword({
@@ -113,29 +129,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               password,
             });
 
-        if (
-          !createAccount &&
-          authResult.error?.message === 'Invalid login credentials'
-        ) {
-          const signUpResult = await supabase.auth.signUp({
-            email,
-            password,
-            options: {
-              data: {
-                accountType,
-              },
-            },
-          });
-
-          if (!signUpResult.error) {
-            authResult = signUpResult;
-          } else if (signUpResult.error.message !== 'User already registered') {
-            return { error: signUpResult.error };
-          }
-        }
-
         if (authResult.error) {
-          return { error: authResult.error };
+          return {
+            error: authResult.error,
+            message: null,
+            session: null,
+            user: null,
+          };
         }
 
         const activeUser = authResult.data.user;
@@ -148,18 +148,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 ? 'Account created. Check your email to confirm your sign-in.'
                 : 'Unable to sign in with email right now.'
             ),
+            message: null,
+            session: null,
+            user: null,
           };
         }
 
         if (!activeSession && createAccount) {
           return {
-            error: new Error('Account created. Check your email to confirm your sign-in.'),
+            error: null,
+            message: 'Account created. Check your email to confirm your sign-in.',
+            session: null,
+            user: activeUser,
           };
         }
 
         if (!activeSession?.access_token) {
           return {
             error: new Error('Unable to finish email sign-in right now.'),
+            message: null,
+            session: null,
+            user: activeUser,
           };
         }
 
@@ -178,16 +187,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const data = (await response.json().catch(() => null)) as { error?: string } | null;
           return {
             error: new Error(data?.error || 'Unable to finish account setup right now.'),
+            message: null,
+            session: activeSession,
+            user: activeUser,
           };
         }
 
-        return { error: null };
+        return {
+          error: null,
+          message: createAccount ? 'Account ready. Redirecting to your dashboard...' : null,
+          session: activeSession,
+          user: activeUser,
+        };
       } catch (error) {
         return {
           error:
             error instanceof Error
               ? error
               : new Error('Unable to sign in with email right now.'),
+          message: null,
+          session: null,
+          user: null,
         };
       }
     },

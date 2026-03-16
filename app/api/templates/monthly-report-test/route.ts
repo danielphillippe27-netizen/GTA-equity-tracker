@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createRequestClient } from '@/lib/supabase/request';
 import { createServiceRoleClient } from '@/lib/supabase/server';
 import { sendTestMonthlyReport } from '@/lib/email/resend';
+import { isFounderEmail } from '@/lib/founder-access';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -11,6 +12,8 @@ export async function POST(request: Request) {
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const founderAccess = isFounderEmail(user.email);
 
   const body = (await request.json().catch(() => null)) as
     | {
@@ -48,7 +51,7 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!membership) {
+  if (!membership && !founderAccess) {
     return NextResponse.json(
       { error: 'Only workspace owners can send test emails.' },
       { status: 403 }
