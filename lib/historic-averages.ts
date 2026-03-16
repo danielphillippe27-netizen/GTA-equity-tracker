@@ -1,4 +1,4 @@
-// Source: TRREB Historic Annual Statistics
+// Source: Revel Realty INC Historic Annual Statistics
 // Used for purchase dates BEFORE 2012 to bridge the gap to HPI data
 
 export const HISTORIC_ANNUAL_AVERAGES: Record<number, number> = {

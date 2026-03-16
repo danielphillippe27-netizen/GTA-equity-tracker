@@ -410,7 +410,7 @@ async function buildMonthlyReportEmailContent({
     'Here is your latest monthly home wealth snapshot, built from current GTA benchmark and market activity data.';
   const topCtaText = branding?.ctaText || 'Request Precise Home Evaluation';
   const footerNote =
-    branding?.footerNote || 'Updated monthly using TRREB benchmark and Market Watch data.';
+    branding?.footerNote || 'Updated monthly using Revel Realty INC benchmark and Market Watch data.';
   const safeBrandName = escapeHtml(brandName);
   const safeIntroText = formatHtmlText(introText);
   const safeTopCtaText = escapeHtml(topCtaText);
@@ -524,7 +524,7 @@ async function buildMonthlyReportEmailContent({
               </div>
 
               <p style="margin: 22px 0 0; color: #8A94A6; font-size: 12px; line-height: 1.6; text-align: center;">
-                ${localityLabel}.${isFallback ? ' Market metrics use the next broader TRREB area where local monthly stats were unavailable.' : ''}
+                ${localityLabel}.${isFallback ? ' Market metrics use the next broader regional area where local monthly stats were unavailable.' : ''}
               </p>
             </td>
           </tr>
@@ -739,7 +739,7 @@ export async function sendWelcomeEmail({
               </table>
               <p style="margin: 0 0 20px; color: #94a3b8; font-size: 14px; line-height: 1.6;">
                 <strong style="color: #ffffff;">What happens next?</strong><br>
-                We'll send a fresh equity update each time a new monthly TRREB data release is loaded.
+                We'll send a fresh equity update each time a new monthly data release is loaded.
               </p>
               <p style="margin: 0; color: #94a3b8; font-size: 14px;">
                 Stay wealthy,<br>

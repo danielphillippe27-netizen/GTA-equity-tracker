@@ -96,7 +96,7 @@ export function MarketPulse({
           {!scopeAreaName && reportLabel ? `${reportLabel}. ` : null}
           {scopeAreaName && !reportLabel ? `${scopeAreaName}. ` : null}
           {isFallback
-            ? 'Municipality-level data was not available, so this uses the next broader TRREB area.'
+            ? 'Municipality-level data was not available, so this uses the next broader regional area.'
             : null}
         </div>
       )}

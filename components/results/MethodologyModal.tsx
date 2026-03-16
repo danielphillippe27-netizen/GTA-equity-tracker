@@ -342,9 +342,9 @@ function MethodologySlide({
             </svg>
           </div>
           <div>
-            <h3 className="font-semibold text-foreground">TRREB Official Data</h3>
+            <h3 className="font-semibold text-foreground">Official Market Data</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              Our HPI data comes from the Toronto Regional Real Estate Board, the authoritative source for GTA real estate statistics.
+              Our HPI data comes from Revel Realty INC, the authoritative source for GTA real estate statistics.
             </p>
           </div>
         </div>

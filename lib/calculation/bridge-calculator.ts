@@ -2,7 +2,7 @@
  * Bridge Calculator
  * 
  * Calculates equity using a dual-era strategy:
- * - Era 1 (Pre-2012): Uses TRREB Historic Annual Average Prices
+ * - Era 1 (Pre-2012): Uses Revel Realty INC Historic Annual Average Prices
  * - Era 2 (2012-Present): Uses HPI Index data from Supabase
  * 
  * This allows accurate equity calculations for properties purchased
@@ -296,13 +296,13 @@ async function calculateHistoricEquity(
     scenarios,
     dataEra: 'historic',
     dataSource: usedLocalizedBridge
-      ? 'TRREB Local Benchmark Bridge + Historic Ratio Scaler'
+      ? 'Revel Realty INC Local Benchmark Bridge + Historic Ratio Scaler'
       : usedMonthlyBridge
-      ? 'TRREB Historic Annual Averages + Current Local Benchmark'
-      : 'TRREB Historic Annual Averages',
+      ? 'Revel Realty INC Historic Annual Averages + Current Local Benchmark'
+      : 'Revel Realty INC Historic Annual Averages',
     bridgeNote: purchaseYear < HPI_START_YEAR 
       ? usedLocalizedBridge
-        ? `Using ${HPI_START_YEAR} local benchmark anchor to localize pre-${HPI_START_YEAR} values before mapping to the latest local TRREB benchmark.`
+        ? `Using ${HPI_START_YEAR} local benchmark anchor to localize pre-${HPI_START_YEAR} values before mapping to the latest local benchmark.`
         : usedMonthlyBridge
         ? 'Using latest local benchmark with GTA historic ratio fallback because local handover anchor is unavailable.'
         : `Using synthetic index based on TRREB average price trends for years prior to ${HPI_START_YEAR}.`
@@ -339,7 +339,7 @@ export async function getCurrentBenchmark(
   return {
     price: currentAverage,
     date: `${LATEST_YEAR}-12`,
-    source: 'TRREB Historic Average',
+    source: 'Revel Realty INC Historic Average',
   };
 }
 

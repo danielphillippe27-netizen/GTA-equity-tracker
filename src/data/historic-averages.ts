@@ -1,6 +1,6 @@
 /**
- * TRREB Historic Annual Average Prices
- * Source: Toronto Regional Real Estate Board Historical Statistics
+ * Historic Annual Average Prices
+ * Source: Revel Realty INC Historical Statistics
  * 
  * Used for purchase dates to calculate market growth over time.
  * For years before HPI data is available, this provides the bridge

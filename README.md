@@ -105,7 +105,7 @@ The application uses historical GTA market data stored in `data/gta-market-avera
 ```json
 {
   "metadata": {
-    "source": "TRREB / Official Board Data",
+    "source": "Revel Realty INC / Official Market Data",
     "lastUpdated": "2024-12-01",
     "currentMarketPhase": "balanced"
   },
@@ -119,7 +119,7 @@ The application uses historical GTA market data stored in `data/gta-market-avera
 }
 ```
 
-Replace the sample data with actual market data from TRREB or your data source.
+Replace the sample data with actual market data from Revel Realty INC or your data source.
 
 ## Project Structure
 
@@ -164,10 +164,10 @@ npm run build    # Build for production
 npm run start    # Start production server
 npm run lint     # Run ESLint
 
-# Monthly TRREB refresh (copy NEW DATA -> archives, import, dry-run reports)
+# Monthly market data refresh (copy NEW DATA -> archives, import, dry-run reports)
 scripts/refresh_trreb_month.sh --workspace-id <workspace-uuid> --report-month YYYY-MM
 
-# Monthly TRREB refresh + send reports
+# Monthly market data refresh + send reports
 scripts/refresh_trreb_month.sh --workspace-id <workspace-uuid> --report-month YYYY-MM --send-reports
 ```
 

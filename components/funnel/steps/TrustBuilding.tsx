@@ -22,9 +22,9 @@ export function TrustBuilding() {
           />
         </svg>
       ),
-      title: 'Official Board Data',
+      title: 'Official Market Data',
       description:
-        'Our estimates are built on historical data from TRREB (Toronto Regional Real Estate Board) and other official sources.',
+        'Our estimates are built on historical data from Revel Realty INC and other official sources.',
     },
     {
       icon: (
