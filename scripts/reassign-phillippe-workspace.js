@@ -10,7 +10,7 @@ const TARGET_BRAND = {
   logoUrl: null,
   primaryColor: '#22d3ee',
   accentColor: '#0f172a',
-  tagline: "Track your specific home's market performance using TRREB-backed benchmark data.",
+  tagline: "Track your specific home's market performance using benchmark data.",
   ctaText: 'See My Home Equity',
 };
 

@@ -779,22 +779,6 @@ export function HeroSection({
               </button>
             </div>
 
-            <div className="mt-6 pt-6 border-t border-slate-700/50">
-              <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-slate-400">
-                <div className="flex items-center gap-2">
-                  <Shield className="w-4 h-4 text-cyan-400" />
-                  <span>Official TRREB Data</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Lock className="w-4 h-4 text-cyan-400" />
-                  <span>Secure Sign-In Required</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-cyan-400" />
-                  <span>Results in Seconds</span>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </div>
