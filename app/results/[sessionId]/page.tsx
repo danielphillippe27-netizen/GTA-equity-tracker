@@ -860,10 +860,10 @@ export default function ResultsPage() {
           </div>
         </motion.section>
 
-        <footer className="mt-6 flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-border/70 bg-surface/50 px-4 py-3 text-center text-xs text-muted-foreground">
-          <ShieldCheck className="h-3.5 w-3.5 text-accent-cyan" />
-          <span>Data source: TRREB benchmark &amp; market stats.</span>
-          {marketStats?.reportMonth ? <span>Latest market pulse month: {formatPeriodLabel(marketStats.reportMonth)}.</span> : null}
+        <footer className="mt-6 rounded-2xl border border-border/70 bg-surface/50 px-4 py-3 text-center text-xs text-muted-foreground">
+          <p className="leading-relaxed">
+            Home value estimates are calculated using publicly available market statistics and user-provided information. Estimates are not provided by TRREB/PropTx and should not be relied upon as a professional appraisal.
+          </p>
         </footer>
           </>
         ) : (

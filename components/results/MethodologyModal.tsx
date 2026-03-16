@@ -144,6 +144,15 @@ export function MethodologyModal({
             </AnimatePresence>
           </div>
 
+          {/* Disclaimer */}
+          <div className="px-6 pb-4">
+            <div className="p-4 rounded-lg bg-muted/20 border border-border">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Home value estimates are calculated using publicly available market statistics and user-provided information. Estimates are not provided by TRREB/PropTx and should not be relied upon as a professional appraisal.
+              </p>
+            </div>
+          </div>
+
           {/* Footer navigation */}
           <div className="sticky bottom-0 bg-surface/90 backdrop-blur-sm border-t border-border px-6 py-4">
             <div className="flex items-center justify-between">

@@ -743,7 +743,7 @@ export function HeroSection({
                 </div>
 
                 <p className="text-sm text-slate-400 leading-relaxed">
-                  We use official Revel Realty INC data to estimate your home&apos;s value. Our licensing requires that access to this report is tied to a named user account, so we can&apos;t make the underlying data publicly available or share it anonymously.
+                  Home value estimates are calculated using publicly available market statistics and user-provided information. Estimates are not provided by TRREB/PropTx and should not be relied upon as a professional appraisal.
                 </p>
               </div>
 
